@@ -17,12 +17,13 @@ Needs **Android 12 or newer**. Everything stays on your phone: no account, no in
 
 ## Install it (no tech skills needed)
 
-1. On your phone, open this project's **Releases** page and download **`Anchor.apk`** (it's under *Assets* in the newest release).
+1. On your phone, tap this link to download the app: **[⬇ Download Anchor.apk](https://github.com/JunjoSick/anchor/releases/latest/download/Anchor.apk)**
+   (It always gets the newest version. You can also find it on the [Releases page](https://github.com/JunjoSick/anchor/releases), under *Assets*.)
 2. Open the downloaded file. Your phone will probably say it can't install apps from this source. Tap **Settings**, turn on **Allow from this source**, then go back and tap **Install**.
    - This warning appears for any app that doesn't come from the Play Store; it's normal.
 3. Open **Anchor**. It asks to send notifications; say **Allow** (timers and reminders need it).
 
-To update later, download the newer `Anchor.apk` the same way and install it over the old one. Your goals are kept.
+To update later, tap the same download link again and install it over the old one. Your goals are kept.
 
 ## First-time setup (2 minutes)
 
