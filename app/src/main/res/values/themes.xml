@@ -1,0 +1,12 @@
+<resources>
+    <!-- Compose draws everything; this only sets the window and launch background (light/dark). -->
+    <style name="Theme.Anchor" parent="android:Theme.DeviceDefault.DayNight">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
+    <!-- Quick add: a sheet over whatever you were doing, not a full screen. -->
+    <style name="Theme.Anchor.Translucent" parent="android:Theme.Translucent.NoTitleBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
+</resources>

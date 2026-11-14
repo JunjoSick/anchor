@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Anchor</string>
+    <string name="widget_label">Goals</string>
+    <string name="widget_description">Your short-term goals, always in sight. Tap one to tick it off.</string>
+    <string name="tile_label">Add goal</string>
+    <string name="shortcut_add">Add goal</string>
+</resources>
