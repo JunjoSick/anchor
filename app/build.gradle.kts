@@ -53,4 +53,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
 
     implementation(libs.androidx.glance.appwidget)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.org.json)
 }

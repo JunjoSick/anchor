@@ -11,8 +11,8 @@ import androidx.glance.appwidget.updateAll
 import dev.junjo.anchor.AnchorApp
 import dev.junjo.anchor.BootReceiver
 import kotlinx.coroutines.launch
-import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZonedDateTime
 
 object Widgets {
     /** Redraws every goals widget on the home screen. Does nothing if there isn't one. */
@@ -48,14 +48,17 @@ object Widgets {
 object DayRollover {
     const val ACTION = "dev.junjo.anchor.DAY_ROLLOVER"
 
+    /** 5 s after the next local midnight (or the first moment of tomorrow, if a clock change skips midnight). */
+    fun nextRun(now: ZonedDateTime = ZonedDateTime.now(ZoneId.systemDefault())): Long =
+        now.toLocalDate().plusDays(1).atStartOfDay(now.zone).toInstant().toEpochMilli() + 5_000
+
     fun schedule(ctx: Context) {
-        val midnight = LocalDate.now().plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val intent = PendingIntent.getBroadcast(
             ctx,
             0,
             Intent(ctx, BootReceiver::class.java).setAction(ACTION),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        ctx.getSystemService(AlarmManager::class.java).set(AlarmManager.RTC, midnight + 5_000, intent)
+        ctx.getSystemService(AlarmManager::class.java).set(AlarmManager.RTC, nextRun(), intent)
     }
 }

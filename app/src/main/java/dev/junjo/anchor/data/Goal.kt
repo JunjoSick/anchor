@@ -59,7 +59,5 @@ fun List<Goal>.active(): List<Goal> = filter { it.isActive }.sortedBy { it.creat
 fun List<Goal>.carriedOver(today: String = today()): List<Goal> = active().filter { it.day < today }
 
 /** Goals ticked off since midnight, newest first. */
-fun List<Goal>.doneToday(): List<Goal> {
-    val start = startOfToday()
-    return filter { !it.deleted && (it.doneAt ?: 0L) >= start }.sortedByDescending { it.doneAt }
-}
+fun List<Goal>.doneToday(startOfDay: Long = startOfToday()): List<Goal> =
+    filter { !it.deleted && (it.doneAt ?: 0L) >= startOfDay }.sortedByDescending { it.doneAt }

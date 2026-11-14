@@ -125,8 +125,7 @@ object FocusTimer {
         val s = _state.value
         when (action) {
             ACTION_END -> {
-                // Ignore a stale alarm, e.g. one that fired just as time was added.
-                if (s.status != Status.RUNNING || s.endAt - now() > 2_000) return
+                if (isStaleEnd(s, now())) return
                 set(s.copy(status = Status.RINGING))
                 TimerNotifications.showDone(appContext, _state.value, loud = true)
                 at(ACTION_SILENCE, now() + RING_FOR)
@@ -145,21 +144,40 @@ object FocusTimer {
 
     /** After a reboot or app update the system has dropped the alarms; put them back. */
     fun restore() {
-        val s = _state.value
+        val before = _state.value
+        val s = afterRestart(before, now())
+        if (s != before) set(s)
         when (s.status) {
-            Status.RUNNING ->
-                if (s.endAt > now()) {
-                    scheduleAlarms()
-                    TimerNotifications.showRunning(appContext, s)
-                } else {
-                    set(s.copy(status = Status.RINGING))
-                    TimerNotifications.showDone(appContext, _state.value, loud = false)
-                }
+            Status.RUNNING -> {
+                scheduleAlarms()
+                TimerNotifications.showRunning(appContext, s)
+            }
             Status.PAUSED -> TimerNotifications.showRunning(appContext, s)
             Status.RINGING -> TimerNotifications.showDone(appContext, s, loud = false)
             Status.IDLE -> Unit
         }
     }
+
+    // The timing decisions, kept free of Android so they can be unit tested.
+
+    /** When each alarm should go off; null for a heads-up that isn't wanted or is too close to schedule. */
+    data class AlarmPlan(val end: Long, val half: Long?, val five: Long?)
+
+    internal fun alarmPlan(s: State, now: Long): AlarmPlan {
+        fun ahead(time: Long) = time.takeIf { it > now + 1_000 }
+        return AlarmPlan(
+            end = s.endAt,
+            half = if (s.totalMs >= HALFWAY_FROM) ahead(s.endAt - s.totalMs / 2) else null,
+            five = if (s.totalMs >= FIVE_LEFT_FROM) ahead(s.endAt - 5 * MINUTE) else null,
+        )
+    }
+
+    /** An end alarm to ignore, e.g. one that fired just as time was added. */
+    internal fun isStaleEnd(s: State, now: Long): Boolean = s.status != Status.RUNNING || s.endAt - now > 2_000
+
+    /** The state to carry on from after a reboot: a timer that ran out meanwhile is ringing. */
+    internal fun afterRestart(s: State, now: Long): State =
+        if (s.status == Status.RUNNING && s.endAt <= now) s.copy(status = Status.RINGING) else s
 
     /** A PendingIntent that sends [action] to [TimerReceiver]; used by alarms and notification buttons. */
     fun broadcast(ctx: Context, action: String): PendingIntent = PendingIntent.getBroadcast(
@@ -171,18 +189,18 @@ object FocusTimer {
 
     private fun scheduleAlarms() {
         cancelAlarms()
-        val s = _state.value
+        val plan = alarmPlan(_state.value, now())
         val am = alarmManager()
         val end = broadcast(appContext, ACTION_END)
         if (am.canScheduleExactAlarms()) {
             // An "alarm clock" alarm is the one kind Android always delivers on time, even in
             // deep battery saving. It also shows the end time in the status bar.
-            am.setAlarmClock(AlarmManager.AlarmClockInfo(s.endAt, Notifications.openApp(appContext)), end)
+            am.setAlarmClock(AlarmManager.AlarmClockInfo(plan.end, Notifications.openApp(appContext)), end)
         } else {
-            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, s.endAt, end)
+            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, plan.end, end)
         }
-        if (s.totalMs >= HALFWAY_FROM) at(ACTION_HALF, s.endAt - s.totalMs / 2)
-        if (s.totalMs >= FIVE_LEFT_FROM) at(ACTION_FIVE, s.endAt - 5 * MINUTE)
+        plan.half?.let { at(ACTION_HALF, it) }
+        plan.five?.let { at(ACTION_FIVE, it) }
     }
 
     private fun at(action: String, time: Long) {
