@@ -2,6 +2,7 @@ package dev.junjo.anchor
 
 import android.app.Application
 import dev.junjo.anchor.data.GoalStore
+import dev.junjo.anchor.data.NoteStore
 import dev.junjo.anchor.data.ReminderStore
 import dev.junjo.anchor.reminders.Reminders
 import dev.junjo.anchor.notify.Notifications
@@ -20,6 +21,7 @@ class AnchorApp : Application() {
         GoalStore.init(this)
         FocusTimer.init(this)
         ReminderStore.init(this)
+        NoteStore.init(this)
         // Cheap, and makes sure no reminder is ever left without its alarm.
         Reminders.scheduleAll(this)
         DayRollover.schedule(this)

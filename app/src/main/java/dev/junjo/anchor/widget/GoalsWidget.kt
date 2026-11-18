@@ -136,7 +136,8 @@ private fun WidgetContent(goals: List<Goal>, timer: FocusTimer.State) {
 @Composable
 private fun TimerChip(timer: FocusTimer.State) {
     val text = when (timer.status) {
-        FocusTimer.Status.RUNNING -> "⏱ until ${clockTime(timer.endAt)}"
+        FocusTimer.Status.RUNNING ->
+            if (timer.isGettingReady) "▶ focus at ${clockTime(timer.endAt)}" else "⏱ until ${clockTime(timer.endAt)}"
         FocusTimer.Status.PAUSED -> "⏸ paused"
         FocusTimer.Status.RINGING -> "⏰ time's up"
         FocusTimer.Status.IDLE -> return

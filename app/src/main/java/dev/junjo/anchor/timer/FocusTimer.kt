@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.os.Build
 import androidx.core.content.edit
 import dev.junjo.anchor.notify.Notifications
 import dev.junjo.anchor.widget.Widgets
@@ -18,9 +19,16 @@ import kotlinx.coroutines.flow.asStateFlow
  * Nothing ticks in the background. The timer is just an end time saved to disk, plus system
  * alarms for the end and the heads-ups. That survives the app being closed, the screen being off
  * and battery saving, and the countdown on screen is worked out from the end time when drawn.
+ *
+ * A timer can start with a short "get ready" countdown: a few minutes to wrap up and settle in,
+ * after which the focus block starts by itself, so starting is something that happens to you
+ * rather than one more decision to make.
  */
 object FocusTimer {
     enum class Status { IDLE, RUNNING, PAUSED, RINGING }
+
+    /** [READY]: counting down to the start of the focus block. [FOCUS]: the block itself. */
+    enum class Phase { READY, FOCUS }
 
     data class State(
         val status: Status = Status.IDLE,
@@ -31,8 +39,14 @@ object FocusTimer {
         val remainingMs: Long = 0,
         val label: String? = null,
         val goalId: String? = null,
+        val phase: Phase = Phase.FOCUS,
+        /** While getting ready: how long the focus block that follows will be. */
+        val focusMs: Long = 0,
+        /** In a focus block that followed getting ready: how long getting ready took, for the progress bar. */
+        val readyMs: Long = 0,
     ) {
         val isActive: Boolean get() = status != Status.IDLE
+        val isGettingReady: Boolean get() = phase == Phase.READY && (status == Status.RUNNING || status == Status.PAUSED)
 
         fun remaining(now: Long = System.currentTimeMillis()): Long = when (status) {
             Status.RUNNING -> (endAt - now).coerceAtLeast(0)
@@ -45,10 +59,12 @@ object FocusTimer {
     const val ACTION_HALF = "dev.junjo.anchor.timer.HALF"
     const val ACTION_FIVE = "dev.junjo.anchor.timer.FIVE"
     const val ACTION_SILENCE = "dev.junjo.anchor.timer.SILENCE"
+    const val ACTION_TICK = "dev.junjo.anchor.timer.TICK"
     const val ACTION_PAUSE = "dev.junjo.anchor.timer.PAUSE"
     const val ACTION_RESUME = "dev.junjo.anchor.timer.RESUME"
     const val ACTION_ADD5 = "dev.junjo.anchor.timer.ADD5"
     const val ACTION_STOP = "dev.junjo.anchor.timer.STOP"
+    const val ACTION_START_NOW = "dev.junjo.anchor.timer.START_NOW"
 
     const val MINUTE = 60_000L
 
@@ -80,6 +96,23 @@ object FocusTimer {
         TimerNotifications.showRunning(appContext, _state.value)
     }
 
+    /** Counts down [readyMinutes], then starts a [focusMinutes] block by itself. */
+    fun startAfter(readyMinutes: Int, focusMinutes: Int, label: String? = null, goalId: String? = null) {
+        if (readyMinutes <= 0) return start(focusMinutes, label, goalId)
+        val ready = readyMinutes * MINUTE
+        TimerNotifications.clearAlerts(appContext)
+        set(State(Status.RUNNING, ready, now() + ready, 0, label, goalId, Phase.READY, focusMinutes * MINUTE))
+        scheduleAlarms()
+        TimerNotifications.showRunning(appContext, _state.value)
+    }
+
+    /** Skips the rest of the get-ready countdown. */
+    fun startNow() {
+        val s = _state.value
+        if (!s.isGettingReady) return
+        beginFocus(s, now())
+    }
+
     fun pause() {
         val s = _state.value
         if (s.status != Status.RUNNING) return
@@ -96,7 +129,10 @@ object FocusTimer {
         TimerNotifications.showRunning(appContext, _state.value)
     }
 
-    /** Adds time; when the timer has finished, starts a new one with the same label (a snooze). */
+    /**
+     * Adds time: to the focus block, or to the get-ready countdown while getting ready. When the
+     * timer has finished, starts a new one with the same label (a snooze).
+     */
     fun addMinutes(minutes: Int) {
         val s = _state.value
         val extra = minutes * MINUTE
@@ -126,6 +162,11 @@ object FocusTimer {
         when (action) {
             ACTION_END -> {
                 if (isStaleEnd(s, now())) return
+                if (s.phase == Phase.READY) {
+                    beginFocus(s, now())
+                    TimerNotifications.showCue(appContext, _state.value, "Time to start")
+                    return
+                }
                 set(s.copy(status = Status.RINGING))
                 TimerNotifications.showDone(appContext, _state.value, loud = true)
                 at(ACTION_SILENCE, now() + RING_FOR)
@@ -138,6 +179,10 @@ object FocusTimer {
             }
             ACTION_SILENCE -> if (s.status == Status.RINGING) {
                 TimerNotifications.showDone(appContext, s, loud = false)
+            }
+            ACTION_TICK -> if (s.status == Status.RUNNING) {
+                TimerNotifications.showRunning(appContext, s)
+                scheduleTick(s)
             }
         }
     }
@@ -165,19 +210,31 @@ object FocusTimer {
 
     internal fun alarmPlan(s: State, now: Long): AlarmPlan {
         fun ahead(time: Long) = time.takeIf { it > now + 1_000 }
+        // Getting ready is a short countdown to a start, not a block to pace: no heads-ups.
+        val focus = s.phase == Phase.FOCUS
         return AlarmPlan(
             end = s.endAt,
-            half = if (s.totalMs >= HALFWAY_FROM) ahead(s.endAt - s.totalMs / 2) else null,
-            five = if (s.totalMs >= FIVE_LEFT_FROM) ahead(s.endAt - 5 * MINUTE) else null,
+            half = if (focus && s.totalMs >= HALFWAY_FROM) ahead(s.endAt - s.totalMs / 2) else null,
+            five = if (focus && s.totalMs >= FIVE_LEFT_FROM) ahead(s.endAt - 5 * MINUTE) else null,
         )
     }
 
     /** An end alarm to ignore, e.g. one that fired just as time was added. */
     internal fun isStaleEnd(s: State, now: Long): Boolean = s.status != Status.RUNNING || s.endAt - now > 2_000
 
-    /** The state to carry on from after a reboot: a timer that ran out meanwhile is ringing. */
-    internal fun afterRestart(s: State, now: Long): State =
-        if (s.status == Status.RUNNING && s.endAt <= now) s.copy(status = Status.RINGING) else s
+    /** The focus block that follows getting ready, starting at [at]. */
+    internal fun focusAfterReady(s: State, at: Long): State =
+        State(Status.RUNNING, s.focusMs, at + s.focusMs, 0, s.label, s.goalId, Phase.FOCUS, 0, readyMs = s.totalMs)
+
+    /**
+     * The state to carry on from after a reboot. A get-ready countdown that ran out meanwhile
+     * started its focus block then, and a timer that ran out meanwhile is ringing.
+     */
+    internal fun afterRestart(s: State, now: Long): State {
+        if (s.status != Status.RUNNING || s.endAt > now) return s
+        if (s.phase == Phase.READY) return afterRestart(focusAfterReady(s, s.endAt), now)
+        return s.copy(status = Status.RINGING)
+    }
 
     /** A PendingIntent that sends [action] to [TimerReceiver]; used by alarms and notification buttons. */
     fun broadcast(ctx: Context, action: String): PendingIntent = PendingIntent.getBroadcast(
@@ -187,9 +244,17 @@ object FocusTimer {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
+    private fun beginFocus(s: State, at: Long) {
+        TimerNotifications.clearAlerts(appContext)
+        set(focusAfterReady(s, at))
+        scheduleAlarms()
+        TimerNotifications.showRunning(appContext, _state.value)
+    }
+
     private fun scheduleAlarms() {
         cancelAlarms()
-        val plan = alarmPlan(_state.value, now())
+        val s = _state.value
+        val plan = alarmPlan(s, now())
         val am = alarmManager()
         val end = broadcast(appContext, ACTION_END)
         if (am.canScheduleExactAlarms()) {
@@ -201,6 +266,22 @@ object FocusTimer {
         }
         plan.half?.let { at(ACTION_HALF, it) }
         plan.five?.let { at(ACTION_FIVE, it) }
+        scheduleTick(s)
+    }
+
+    /**
+     * The Live Update's progress bar doesn't move by itself (the countdown digits do), so it is
+     * redrawn once a minute. With a non-waking alarm: while the phone sleeps nobody can see the
+     * bar, so the redraw simply waits until the phone is next awake and costs nothing meanwhile.
+     */
+    private fun scheduleTick(s: State) {
+        if (Build.VERSION.SDK_INT < 36 || s.status != Status.RUNNING) return
+        val next = now() + MINUTE
+        if (next >= s.endAt) return
+        val am = alarmManager()
+        val pi = broadcast(appContext, ACTION_TICK)
+        if (am.canScheduleExactAlarms()) am.setExact(AlarmManager.RTC, next, pi)
+        else am.setWindow(AlarmManager.RTC, next, 10_000, pi)
     }
 
     private fun at(action: String, time: Long) {
@@ -213,7 +294,7 @@ object FocusTimer {
 
     private fun cancelAlarms() {
         val am = alarmManager()
-        listOf(ACTION_END, ACTION_HALF, ACTION_FIVE, ACTION_SILENCE).forEach { am.cancel(broadcast(appContext, it)) }
+        listOf(ACTION_END, ACTION_HALF, ACTION_FIVE, ACTION_SILENCE, ACTION_TICK).forEach { am.cancel(broadcast(appContext, it)) }
     }
 
     private fun minutesLeft(s: State) = (s.remaining() + 30_000) / MINUTE
@@ -231,6 +312,9 @@ object FocusTimer {
             putLong("remaining", s.remainingMs)
             putString("label", s.label)
             putString("goal", s.goalId)
+            putString("phase", s.phase.name)
+            putLong("focus", s.focusMs)
+            putLong("ready", s.readyMs)
         }
         Widgets.refresh(appContext)
     }
@@ -242,5 +326,8 @@ object FocusTimer {
         remainingMs = prefs.getLong("remaining", 0),
         label = prefs.getString("label", null),
         goalId = prefs.getString("goal", null),
+        phase = runCatching { Phase.valueOf(prefs.getString("phase", null) ?: "FOCUS") }.getOrDefault(Phase.FOCUS),
+        focusMs = prefs.getLong("focus", 0),
+        readyMs = prefs.getLong("ready", 0),
     )
 }

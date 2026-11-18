@@ -22,6 +22,7 @@ object Notifications {
     const val CH_CUE = "timer_cue"
     const val CH_DONE = "timer_done"
     const val CH_REMINDER = "reminders"
+    const val CH_REMINDER_ALARM = "reminder_alarms"
 
     const val ID_GOALS = 1
     const val ID_TIMER = 2
@@ -47,19 +48,22 @@ object Notifications {
 
         val alarmSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
             ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-        val done = NotificationChannel(CH_DONE, "Timer finished", NotificationManager.IMPORTANCE_HIGH).apply {
-            description = "Rings until you tap Done, like an alarm clock"
-            setSound(
-                alarmSound,
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build(),
-            )
-            enableVibration(true)
-            vibrationPattern = longArrayOf(0, 600, 400, 600)
-            lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-        }
+        // Rings through silent mode like an alarm clock does (and Do Not Disturb, if alarms are allowed).
+        fun ringing(id: String, name: String, about: String) =
+            NotificationChannel(id, name, NotificationManager.IMPORTANCE_HIGH).apply {
+                description = about
+                setSound(
+                    alarmSound,
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build(),
+                )
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 600, 400, 600)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
+        val done = ringing(CH_DONE, "Timer finished", "Rings until you tap Done, like an alarm clock")
 
         ctx.getSystemService(NotificationManager::class.java).createNotificationChannels(
             listOf(
@@ -71,6 +75,7 @@ object Notifications {
                     description = "Reminders you set for a time of day"
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                 },
+                ringing(CH_REMINDER_ALARM, "Reminder alarms", "Reminders set to ring like an alarm, until you tap Done or Snooze"),
             ),
         )
     }

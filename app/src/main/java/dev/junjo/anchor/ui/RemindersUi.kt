@@ -25,6 +25,11 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
@@ -52,12 +57,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.junjo.anchor.R
 import dev.junjo.anchor.data.Reminder
 import dev.junjo.anchor.data.ReminderStore
+import dev.junjo.anchor.clockTime
+import dev.junjo.anchor.reminders.Reminders
+import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 /** The "Daily reminders" part of the main list. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -72,7 +84,7 @@ fun LazyListScope.remindersSection(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "Daily reminders",
+                "Reminders",
                 style = MaterialTheme.typography.titleMediumEmphasized,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.weight(1f),
@@ -87,8 +99,9 @@ fun LazyListScope.remindersSection(
     if (reminders.isEmpty()) {
         item(key = "reminders-empty") {
             Text(
-                "For things that come back every day, like meds, water or winding down for bed. " +
-                    "When one goes off it lands on your goal list and stays there until you tick it off.",
+                "For things that come back, like meds, water or winding down for bed: on set days, or every few days or hours. " +
+                    "When one goes off it lands on your goal list and stays there until you tick it off. " +
+                    "Can't miss it? Make it ring like an alarm.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.animateItem().padding(horizontal = 8.dp),
@@ -110,11 +123,22 @@ private fun ReminderRow(r: Reminder, shape: androidx.compose.ui.graphics.Shape, 
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text(
-                    r.timeText,
-                    style = MaterialTheme.typography.headlineSmallEmphasized,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = dim),
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (r.repeatsByInterval) Reminders.next(r)?.let { "Next ${whenText(it)}" } ?: r.timeText else r.timeText,
+                        style = MaterialTheme.typography.headlineSmallEmphasized,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = dim),
+                    )
+                    if (r.alarm) {
+                        Spacer(Modifier.width(8.dp))
+                        Icon(
+                            painterResource(R.drawable.ic_bell),
+                            contentDescription = "Rings like an alarm",
+                            tint = MaterialTheme.colorScheme.tertiary.copy(alpha = dim),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
                 Text(
                     r.text,
                     style = MaterialTheme.typography.bodyLarge,
@@ -145,12 +169,44 @@ fun ReminderSheet(initial: Reminder?, onDismiss: () -> Unit) {
     var text by remember { mutableStateOf(initial?.text ?: "") }
     var days by remember { mutableIntStateOf(initial?.days ?: Reminder.ALL_DAYS) }
     var addAsGoal by remember { mutableStateOf(initial?.addAsGoal ?: true) }
+    var alarm by remember { mutableStateOf(initial?.alarm ?: false) }
+    var byInterval by remember { mutableStateOf(initial?.repeatsByInterval ?: false) }
+    var everyDays by remember {
+        mutableIntStateOf(initial?.takeIf { it.repeatsByInterval }?.let { it.everyMinutes / Reminder.DAY_MINUTES } ?: 2)
+    }
+    var everyHours by remember {
+        mutableIntStateOf(initial?.takeIf { it.repeatsByInterval }?.let { (it.everyMinutes % Reminder.DAY_MINUTES) / 60 } ?: 0)
+    }
     val time = rememberTimePickerState(
         initialHour = initial?.hour ?: defaultTime.hour,
         initialMinute = initial?.minute ?: defaultTime.minute,
         is24Hour = DateFormat.is24HourFormat(ctx),
     )
-    val canSave = text.isNotBlank() && days != 0
+    val everyMinutes = if (byInterval) everyDays * Reminder.DAY_MINUTES + everyHours * 60 else 0
+    val canSave = text.isNotBlank() && if (byInterval) everyMinutes > 0 else days != 0
+
+    /** The reminder as it would be saved now. */
+    fun draft(): Reminder {
+        val base = initial ?: Reminder.new(text, time.hour, time.minute, days, addAsGoal)
+        // Editing only the text or switches keeps an interval where it was in its cycle.
+        val sameCycle = initial != null && initial.everyMinutes == everyMinutes &&
+            initial.hour == time.hour && initial.minute == time.minute
+        return base.copy(
+            text = text,
+            hour = time.hour,
+            minute = time.minute,
+            days = days,
+            addAsGoal = addAsGoal,
+            enabled = true,
+            alarm = alarm,
+            everyMinutes = everyMinutes,
+            startAt = when {
+                everyMinutes == 0 -> 0
+                sameCycle -> initial.startAt
+                else -> Reminder.intervalStart(time.hour, time.minute, everyMinutes)
+            },
+        )
+    }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
@@ -161,7 +217,7 @@ fun ReminderSheet(initial: Reminder?, onDismiss: () -> Unit) {
                 .padding(bottom = 16.dp),
         ) {
             Text(
-                if (initial == null) "New daily reminder" else "Edit reminder",
+                if (initial == null) "New reminder" else "Edit reminder",
                 style = MaterialTheme.typography.headlineSmallEmphasized,
             )
             Spacer(Modifier.height(16.dp))
@@ -178,15 +234,65 @@ fun ReminderSheet(initial: Reminder?, onDismiss: () -> Unit) {
                 ),
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
             )
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(16.dp))
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                SegmentedButton(
+                    selected = !byInterval,
+                    onClick = { byInterval = false },
+                    shape = SegmentedButtonDefaults.itemShape(0, 2),
+                ) { Text("On set days") }
+                SegmentedButton(
+                    selected = byInterval,
+                    onClick = { byInterval = true },
+                    shape = SegmentedButtonDefaults.itemShape(1, 2),
+                ) { Text("Every few…") }
+            }
+            if (byInterval) {
+                Spacer(Modifier.height(16.dp))
+                Stepper("Every", everyDays, if (everyDays == 1) "day" else "days", 0..60) { everyDays = it }
+                Stepper("and", everyHours, if (everyHours == 1) "hour" else "hours", 0..23) { everyHours = it }
+            }
+            Text(
+                if (byInterval) "Starting at" else "At",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
+            )
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { TimePicker(state = time) }
 
-            Text("Repeat on", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
-            DayPicker(days, onChange = { days = it })
-            Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { days = Reminder.ALL_DAYS }, shapes = ButtonDefaults.shapes()) { Text("Every day") }
-                TextButton(onClick = { days = Reminder.WEEKDAYS }, shapes = ButtonDefaults.shapes()) { Text("Weekdays") }
-                TextButton(onClick = { days = Reminder.WEEKEND }, shapes = ButtonDefaults.shapes()) { Text("Weekends") }
+            if (!byInterval) {
+                Text("Repeat on", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
+                DayPicker(days, onChange = { days = it })
+                Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { days = Reminder.ALL_DAYS }, shapes = ButtonDefaults.shapes()) { Text("Every day") }
+                    TextButton(onClick = { days = Reminder.WEEKDAYS }, shapes = ButtonDefaults.shapes()) { Text("Weekdays") }
+                    TextButton(onClick = { days = Reminder.WEEKEND }, shapes = ButtonDefaults.shapes()) { Text("Weekends") }
+                }
+            }
+            if (canSave) {
+                Reminders.next(draft())?.let {
+                    Text(
+                        "Next: ${whenText(it)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 8.dp, start = 4.dp),
+                    )
+                }
+            }
+
+            Row(
+                Modifier.fillMaxWidth().clickable { alarm = !alarm }.padding(top = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Ring like an alarm", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "Rings and fills the screen until you tap Done or Snooze, even on silent. For the things you can't miss.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Switch(checked = alarm, onCheckedChange = { alarm = it })
             }
 
             Row(
@@ -216,15 +322,7 @@ fun ReminderSheet(initial: Reminder?, onDismiss: () -> Unit) {
                 Spacer(Modifier.weight(1f))
                 Button(
                     onClick = {
-                        val saved = initial?.copy(
-                            text = text,
-                            hour = time.hour,
-                            minute = time.minute,
-                            days = days,
-                            addAsGoal = addAsGoal,
-                            enabled = true,
-                        ) ?: Reminder.new(text, time.hour, time.minute, days, addAsGoal)
-                        ReminderStore.save(saved)
+                        ReminderStore.save(draft())
                         onDismiss()
                     },
                     enabled = canSave,
@@ -233,6 +331,46 @@ fun ReminderSheet(initial: Reminder?, onDismiss: () -> Unit) {
             }
         }
     }
+}
+
+/** A number with - and + buttons, like "Every [-] 2 [+] days". */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun Stepper(before: String, value: Int, after: String, range: IntRange, onChange: (Int) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(before, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.width(56.dp))
+        FilledTonalIconButton(
+            onClick = { onChange(value - 1) },
+            enabled = value > range.first,
+            shapes = IconButtonDefaults.shapes(),
+        ) { Icon(painterResource(R.drawable.ic_remove), "Fewer") }
+        Text(
+            "$value",
+            style = MaterialTheme.typography.headlineSmallEmphasized,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.width(48.dp),
+        )
+        FilledTonalIconButton(
+            onClick = { onChange(value + 1) },
+            enabled = value < range.last,
+            shapes = IconButtonDefaults.shapes(),
+        ) { Icon(painterResource(R.drawable.ic_add), "More") }
+        Spacer(Modifier.width(12.dp))
+        Text(after, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+/** "today 14:00", "tomorrow 9:00" or "Thu 20 Nov 9:00". */
+private fun whenText(epochMs: Long): String {
+    val zone = ZoneId.systemDefault()
+    val date = Instant.ofEpochMilli(epochMs).atZone(zone).toLocalDate()
+    val today = LocalDate.now(zone)
+    val day = when (date) {
+        today -> "today"
+        today.plusDays(1) -> "tomorrow"
+        else -> date.format(DateTimeFormatter.ofPattern("EEE d MMM"))
+    }
+    return "$day ${clockTime(epochMs)}"
 }
 
 /** Seven day buttons, Monday first. A picked day turns into a filled cookie. */

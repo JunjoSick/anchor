@@ -83,6 +83,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -110,7 +111,7 @@ private val DONE_MESSAGES = listOf("Done ✓", "Nice, that's done", "Ticked off 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun HomeScreen() {
+fun HomeScreen(bottomBar: @Composable () -> Unit = {}) {
     val ctx = LocalContext.current
     val view = LocalView.current
     val goals by GoalStore.goals.collectAsStateWithLifecycle()
@@ -161,9 +162,10 @@ fun HomeScreen() {
         offerUndo("Deleted") { GoalStore.restore(goal.id) }
     }
 
-    fun startFor(goal: Goal, minutes: Int) {
-        FocusTimer.start(minutes, goal.text, goal.id)
-        scope.launch { snackbar.showSnackbar("Timer started: $minutes min") }
+    fun startFor(goal: Goal, ready: Int, focus: Int) {
+        FocusTimer.startAfter(ready, focus, goal.text, goal.id)
+        val message = if (ready > 0) "Focus starts in $ready min" else "Timer started: $focus min"
+        scope.launch { snackbar.showSnackbar(message) }
     }
 
     // Derived lists are rebuilt only when the data behind them changes, not on every redraw.
@@ -194,6 +196,7 @@ fun HomeScreen() {
                 scrollBehavior = scrollBehavior,
             )
         },
+        bottomBar = bottomBar,
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         LazyColumn(
@@ -248,7 +251,7 @@ fun HomeScreen() {
                     shape = segmentShape(i, current.size),
                     modifier = Modifier.animateItem(),
                     onDone = { complete(goal) },
-                    onStart = { startFor(goal, it) },
+                    onStart = { ready, focus -> startFor(goal, ready, focus) },
                     onDelete = { remove(goal) },
                 )
             }
@@ -378,7 +381,7 @@ private fun GoalRow(
     shape: androidx.compose.ui.graphics.Shape,
     modifier: Modifier,
     onDone: () -> Unit,
-    onStart: (Int) -> Unit,
+    onStart: (ready: Int, focus: Int) -> Unit,
     onDelete: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -404,9 +407,15 @@ private fun GoalRow(
                     Icon(painterResource(R.drawable.ic_play), "Start a timer for this goal", tint = MaterialTheme.colorScheme.primary)
                 }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text("Just start · 5 min") }, onClick = { menu = false; onStart(5) })
-                    DropdownMenuItem(text = { Text("Focus · 15 min") }, onClick = { menu = false; onStart(15) })
-                    DropdownMenuItem(text = { Text("Focus · 25 min") }, onClick = { menu = false; onStart(25) })
+                    val ctx = LocalContext.current
+                    val focus = remember { AppPrefs.focusMinutes(ctx) }
+                    val ready = remember { AppPrefs.readyMinutes(ctx) }
+                    DropdownMenuItem(text = { Text("Just start · 5 min") }, onClick = { menu = false; onStart(0, 5) })
+                    DropdownMenuItem(text = { Text("Focus · $focus min") }, onClick = { menu = false; onStart(0, focus) })
+                    DropdownMenuItem(
+                        text = { Text("Get ready $ready min, then focus") },
+                        onClick = { menu = false; onStart(ready, focus) },
+                    )
                     HorizontalDivider()
                     DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; onDelete() })
                 }
@@ -532,6 +541,13 @@ private fun setupItems(ctx: Context, onWidgetUnsupported: () -> Unit): List<Setu
     if (Build.VERSION.SDK_INT >= 34 && !ctx.getSystemService(NotificationManager::class.java).canUseFullScreenIntent()) add(
         SetupItem("Allow full-screen alarms", "So “time's up” fills the screen even when the phone is locked.", "Allow") {
             open(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$pkg")))
+        },
+    )
+    if (Build.VERSION.SDK_INT >= 36 && Notifications.canPost(ctx) &&
+        !NotificationManagerCompat.from(ctx).canPostPromotedNotifications()
+    ) add(
+        SetupItem("Show timers as Live Updates", "The countdown sits in the status bar and on top of your notifications.", "Allow") {
+            open(Intent(Settings.ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, pkg))
         },
     )
     if (!FloatingGoals.isOn(ctx)) add(

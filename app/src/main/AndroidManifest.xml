@@ -63,6 +63,14 @@
             android:taskAffinity=""
             android:turnScreenOn="true" />
 
+        <activity
+            android:name=".reminders.ReminderAlarmActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:showWhenLocked="true"
+            android:taskAffinity=""
+            android:turnScreenOn="true" />
+
         <receiver
             android:name=".widget.GoalsWidgetReceiver"
             android:exported="true"

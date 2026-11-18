@@ -30,6 +30,14 @@ class ReminderTest {
     @Test fun jsonRoundTrip() {
         val r = Reminder("id", "Meds", 8, 5, 0b0010101, enabled = false, addAsGoal = false, createdAt = 10, updatedAt = 20, deleted = true)
         assertEquals(r, Reminder.fromJson(JSONObject(r.toJson().toString())))
+        val alarm = r.copy(alarm = true, everyMinutes = 2 * Reminder.DAY_MINUTES + 60, startAt = 123_456)
+        assertEquals(alarm, Reminder.fromJson(JSONObject(alarm.toJson().toString())))
+    }
+
+    @Test fun intervalDaysText() {
+        val r = reminder(0).copy(everyMinutes = 8 * 60, startAt = 1)
+        assertTrue(r.repeatsByInterval)
+        assertTrue(r.daysText, r.daysText.startsWith("Every 8 hours, from "))
     }
 
     @Test fun olderFileWithoutOptionalFieldsLoadsWithDefaults() {
@@ -39,5 +47,8 @@ class ReminderTest {
         assertTrue(r.enabled)
         assertTrue(r.addAsGoal)
         assertFalse(r.deleted)
+        // Files from v0.1 have no alarm or interval: a quiet reminder on set days.
+        assertFalse(r.alarm)
+        assertFalse(r.repeatsByInterval)
     }
 }

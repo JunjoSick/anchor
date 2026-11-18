@@ -14,6 +14,7 @@ import java.io.FileNotFoundException
 import java.io.IOException
 import java.time.DayOfWeek
 import java.time.LocalTime
+import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.UUID
@@ -36,14 +37,25 @@ data class Reminder(
     val createdAt: Long,
     val updatedAt: Long,
     val deleted: Boolean = false,
+    /** Rings and fills the screen like an alarm clock, instead of a normal notification. */
+    val alarm: Boolean = false,
+    /**
+     * 0: repeats at [hour]:[minute] on the picked [days]. Otherwise repeats every this many
+     * minutes (a whole number of days and/or hours), counted from [startAt]; [days] is unused.
+     */
+    val everyMinutes: Int = 0,
+    /** For a repeat every few days or hours: the first time it goes off. */
+    val startAt: Long = 0,
 ) {
+    val repeatsByInterval: Boolean get() = everyMinutes > 0
+
     fun isOn(day: DayOfWeek) = days and (1 shl (day.value - 1)) != 0
 
     val timeText: String
         get() = LocalTime.of(hour, minute).format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT))
 
     val daysText: String
-        get() = when (days) {
+        get() = if (repeatsByInterval) "${intervalText(everyMinutes)}, from $timeText" else when (days) {
             ALL_DAYS -> "Every day"
             WEEKDAYS -> "Weekdays"
             WEEKEND -> "Weekends"
@@ -62,6 +74,9 @@ data class Reminder(
         put("createdAt", createdAt)
         put("updatedAt", updatedAt)
         put("deleted", deleted)
+        put("alarm", alarm)
+        put("everyMinutes", everyMinutes)
+        put("startAt", startAt)
     }
 
     companion object {
@@ -75,6 +90,20 @@ data class Reminder(
             return Reminder(UUID.randomUUID().toString(), text, hour, minute, days, true, addAsGoal, now, now)
         }
 
+        /**
+         * Where a repeat every few days or hours starts, from the time of day picked for it.
+         * Whole days: the next time that clock time comes round, so "every 2 days at 9:00" set at
+         * 10:00 starts tomorrow, not in two days. With hours: today at that time, even if it has
+         * passed, so "every 3 hours from 8:00" set at 10:00 next goes off at 11:00.
+         */
+        fun intervalStart(hour: Int, minute: Int, everyMinutes: Int, now: ZonedDateTime = ZonedDateTime.now()): Long {
+            val today = now.toLocalDate().atTime(hour, minute).atZone(now.zone)
+            val start = if (everyMinutes % DAY_MINUTES == 0 && !today.isAfter(now)) {
+                now.toLocalDate().plusDays(1).atTime(hour, minute).atZone(now.zone)
+            } else today
+            return start.toInstant().toEpochMilli()
+        }
+
         fun fromJson(o: JSONObject) = Reminder(
             id = o.getString("id"),
             text = o.getString("text"),
@@ -86,7 +115,21 @@ data class Reminder(
             createdAt = o.getLong("createdAt"),
             updatedAt = o.getLong("updatedAt"),
             deleted = o.optBoolean("deleted", false),
+            alarm = o.optBoolean("alarm", false),
+            everyMinutes = o.optInt("everyMinutes", 0),
+            startAt = o.optLong("startAt", 0),
         )
+
+        const val DAY_MINUTES = 24 * 60
+
+        /** "Every 2 days", "Every 3 hours", "Every day and 6 hours". */
+        fun intervalText(minutes: Int): String {
+            val d = minutes / DAY_MINUTES
+            val h = (minutes % DAY_MINUTES) / 60
+            val days = when (d) { 0 -> null; 1 -> "day"; else -> "$d days" }
+            val hours = when (h) { 0 -> null; 1 -> "hour"; else -> "$h hours" }
+            return "Every " + listOfNotNull(days, hours).joinToString(" and ")
+        }
     }
 }
 

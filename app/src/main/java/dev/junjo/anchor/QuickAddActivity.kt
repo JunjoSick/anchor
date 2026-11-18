@@ -46,7 +46,11 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import dev.junjo.anchor.data.GoalStore
+import dev.junjo.anchor.data.NoteStore
 import dev.junjo.anchor.ui.AnchorTheme
 import kotlinx.coroutines.delay
 
@@ -59,14 +63,21 @@ class QuickAddActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { AnchorTheme { QuickAddSheet(onClose = { finish() }) } }
+        val startAsNote = intent?.action == ACTION_NEW_NOTE
+        setContent { AnchorTheme { QuickAddSheet(startAsNote, onClose = { finish() }) } }
+    }
+
+    companion object {
+        const val ACTION_NEW_NOTE = "dev.junjo.anchor.NEW_NOTE"
     }
 }
 
+/** A goal is one line to tick off; a note can be anything, over several lines. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun QuickAddSheet(onClose: () -> Unit) {
+private fun QuickAddSheet(startAsNote: Boolean, onClose: () -> Unit) {
     var text by remember { mutableStateOf("") }
+    var asNote by remember { mutableStateOf(startAsNote) }
     var added by remember { mutableIntStateOf(0) }
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -78,7 +89,7 @@ private fun QuickAddSheet(onClose: () -> Unit) {
     }
 
     fun save(): Boolean {
-        val ok = GoalStore.add(text) != null
+        val ok = if (asNote) NoteStore.add(text) != null else GoalStore.add(text) != null
         if (ok) {
             text = ""
             added++
@@ -104,18 +115,33 @@ private fun QuickAddSheet(onClose: () -> Unit) {
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
         ) {
             Column(Modifier.navigationBarsPadding().padding(16.dp)) {
-                Text(
-                    if (added == 0) "New goal" else "Added $added ✓  Another one?",
-                    style = MaterialTheme.typography.titleLargeEmphasized,
-                    modifier = Modifier.padding(start = 4.dp),
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (added == 0) (if (asNote) "New note" else "New goal") else "Saved $added ✓  Another one?",
+                        style = MaterialTheme.typography.titleLargeEmphasized,
+                        modifier = Modifier.padding(start = 4.dp).weight(1f),
+                    )
+                    SingleChoiceSegmentedButtonRow {
+                        SegmentedButton(
+                            selected = !asNote,
+                            onClick = { asNote = false },
+                            shape = SegmentedButtonDefaults.itemShape(0, 2),
+                        ) { Text("Goal") }
+                        SegmentedButton(
+                            selected = asNote,
+                            onClick = { asNote = true },
+                            shape = SegmentedButtonDefaults.itemShape(1, 2),
+                        ) { Text("Note") }
+                    }
+                }
                 Spacer(Modifier.height(12.dp))
                 TextField(
                     value = text,
                     onValueChange = { text = it },
                     modifier = Modifier.fillMaxWidth().focusRequester(focus),
-                    placeholder = { Text("What do you want to remember?") },
-                    singleLine = true,
+                    placeholder = { Text(if (asNote) "Write it down…" else "What do you want to get done?") },
+                    singleLine = !asNote,
+                    maxLines = if (asNote) 8 else 1,
                     shape = RoundedCornerShape(28.dp),
                     colors = TextFieldDefaults.colors(
                         focusedIndicatorColor = Color.Transparent,
@@ -123,16 +149,17 @@ private fun QuickAddSheet(onClose: () -> Unit) {
                         focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                         unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                     ),
+                    // A goal is saved with Enter; in a note Enter starts a new line.
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.Sentences,
-                        imeAction = ImeAction.Done,
+                        imeAction = if (asNote) ImeAction.Default else ImeAction.Done,
                     ),
                     keyboardActions = KeyboardActions(onDone = { save(); onClose() }),
                 )
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-                    TextButton(onClick = { save() }, shapes = ButtonDefaults.shapes()) { Text("Add another") }
-                    Button(onClick = { save(); onClose() }, shapes = ButtonDefaults.shapes()) { Text("Add") }
+                    TextButton(onClick = { save() }, shapes = ButtonDefaults.shapes()) { Text("Save, add another") }
+                    Button(onClick = { save(); onClose() }, shapes = ButtonDefaults.shapes()) { Text("Save") }
                 }
             }
         }

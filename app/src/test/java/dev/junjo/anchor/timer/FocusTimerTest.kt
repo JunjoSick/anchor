@@ -2,6 +2,7 @@ package dev.junjo.anchor.timer
 
 import dev.junjo.anchor.timer.FocusTimer.AlarmPlan
 import dev.junjo.anchor.timer.FocusTimer.MINUTE
+import dev.junjo.anchor.timer.FocusTimer.Phase
 import dev.junjo.anchor.timer.FocusTimer.State
 import dev.junjo.anchor.timer.FocusTimer.Status
 import org.junit.Assert.assertEquals
@@ -60,6 +61,69 @@ class FocusTimerTest {
         for (status in listOf(Status.IDLE, Status.PAUSED, Status.RINGING)) {
             assertTrue("$status", FocusTimer.isStaleEnd(running(5, endsIn = 0).copy(status = status), now))
         }
+    }
+
+    private fun gettingReady(readyMin: Int, focusMin: Int, endsIn: Long = readyMin * MINUTE) =
+        State(Status.RUNNING, readyMin * MINUTE, now + endsIn, label = "Write", goalId = "g", phase = Phase.READY, focusMs = focusMin * MINUTE)
+
+    @Test fun gettingReadyHasNoHeadsUps() {
+        // Even a long get-ready countdown only has its end.
+        assertEquals(AlarmPlan(now + 15 * MINUTE, null, null), FocusTimer.alarmPlan(gettingReady(15, 25), now))
+        assertTrue(gettingReady(5, 25).isGettingReady)
+        assertTrue(gettingReady(5, 25).copy(status = Status.PAUSED).isGettingReady)
+        assertFalse(running(25).isGettingReady)
+    }
+
+    @Test fun focusFollowsGettingReady() {
+        val focus = FocusTimer.focusAfterReady(gettingReady(5, 25), now)
+        assertEquals(State(Status.RUNNING, 25 * MINUTE, now + 25 * MINUTE, 0, "Write", "g", Phase.FOCUS, 0, readyMs = 5 * MINUTE), focus)
+        // And it gets the focus heads-ups.
+        assertEquals(AlarmPlan(now + 25 * MINUTE, now + 12 * MINUTE + 30_000, now + 20 * MINUTE), FocusTimer.alarmPlan(focus, now))
+    }
+
+    @Test fun afterRestartWhileGettingReady() {
+        val ready = gettingReady(5, 25, endsIn = 2 * MINUTE)
+        assertSame(ready, FocusTimer.afterRestart(ready, now))
+
+        // The phone was off when the countdown ended: focus started then, and is still going.
+        val missedStart = gettingReady(5, 25, endsIn = -10 * MINUTE)
+        val focus = FocusTimer.afterRestart(missedStart, now)
+        assertEquals(Phase.FOCUS, focus.phase)
+        assertEquals(Status.RUNNING, focus.status)
+        assertEquals(now + 15 * MINUTE, focus.endAt)
+
+        // Off for longer than both: the focus block has finished too.
+        val missedAll = FocusTimer.afterRestart(gettingReady(5, 25, endsIn = -40 * MINUTE), now)
+        assertEquals(Status.RINGING, missedAll.status)
+        assertEquals(Phase.FOCUS, missedAll.phase)
+
+        // Paused while getting ready stays paused.
+        val paused = gettingReady(5, 25).copy(status = Status.PAUSED, remainingMs = MINUTE)
+        assertEquals(paused, FocusTimer.afterRestart(paused, now + 60 * MINUTE))
+    }
+
+    @Test fun progressBarCoversTheWholeSession() {
+        val ready = gettingReady(5, 25, endsIn = 2 * MINUTE)
+        val b = TimerNotifications.bar(ready, now)
+        assertEquals(listOf(TimerNotifications.Part.READY to 300, TimerNotifications.Part.FOCUS to 1500), b.segments)
+        assertEquals(180, b.progress)
+        assertEquals(listOf(300 + 750, 300 + 1200), b.marks)
+
+        // Ten minutes into the focus that followed: both segments still drawn, past getting ready.
+        val focus = FocusTimer.focusAfterReady(ready, now - 10 * MINUTE)
+        val f = TimerNotifications.bar(focus, now)
+        assertEquals(b.segments, f.segments)
+        assertEquals(300 + 600, f.progress)
+        assertEquals(b.marks, f.marks)
+
+        // A plain timer: one segment; a short one has no marks.
+        val plain = TimerNotifications.bar(running(5, endsIn = MINUTE), now)
+        assertEquals(listOf(TimerNotifications.Part.FOCUS to 300), plain.segments)
+        assertEquals(240, plain.progress)
+        assertEquals(emptyList<Int>(), plain.marks)
+
+        // Paused keeps its place.
+        assertEquals(1500 - 420, TimerNotifications.bar(State(Status.PAUSED, 25 * MINUTE, remainingMs = 7 * MINUTE), now).progress)
     }
 
     @Test fun afterRestart() {

@@ -7,9 +7,10 @@ The idea is simple: the problem usually isn't *knowing* what to do, it's remembe
 ## What it does
 
 - **Goals that stay in sight:** a home-screen widget, the lock screen, and an optional little bubble that floats over every app with your top goal. Tap a goal to tick it off.
-- **Add a goal in two seconds:** from the widget, a Quick Settings button, the app icon, or straight from the notification. The keyboard is already open.
-- **Timers:** a shrinking disc so you *see* time passing, a nudge halfway through and 5 minutes before the end, and an alarm that keeps ringing until you tap Done. Got a goal you're avoiding? "Just start · 5 min".
-- **Daily reminders:** meds, water, bedtime. When one goes off it stays on your goal list until you tick it off, so it can't get swiped away and forgotten.
+- **Add a goal or a note in two seconds:** from the widget, a Quick Settings button, the app icon (long-press it for "New note"), or straight from the notification. The keyboard is already open.
+- **Focus timer:** pick how long, then start now or **"Start in 5 min"**: a short get-ready countdown, after which focus begins by itself. A shrinking disc so you *see* time passing, a nudge halfway and 5 minutes before the end, and an alarm that keeps ringing until you tap Done. On Android 16 it's a **Live Update**: the countdown sits in the status bar, with a progress bar on top of your notifications.
+- **Reminders:** meds, water, bedtime. On set days, or **every few days or hours**. Quiet ones are a normal notification; important ones can **ring like an alarm** until you answer. When one goes off it stays on your goal list until you tick it off, so it can't get swiped away and forgotten.
+- **Notes:** for things that aren't tasks: thoughts, ideas, stuff to look up. One that turns out to be a task becomes a goal with one tap.
 - **No guilt:** unfinished goals from yesterday ask once: keep or drop. Dropping is fine.
 - **Light on battery:** nothing runs while the screen is off.
 
@@ -38,14 +39,14 @@ The app shows a **Setup** card with buttons for each of these. Do the ones you l
 
 - Keep the list **short**. 3 goals you'll actually do beat 12 you'll ignore. The app nudges you if the list gets long.
 - Make goals **small and specific**: "reply to Sam about Saturday", not "sort out messages".
-- Stuck? Tap ▶ next to a goal and choose **Just start · 5 min**. Starting is the hard part; five minutes is easy to say yes to.
+- Stuck? Tap ▶ next to a goal and choose **Just start · 5 min**. Starting is the hard part; five minutes is easy to say yes to. Not quite ready? **Get ready, then focus** gives you a few minutes to wrap up, then starts for you.
 - The floating bubble can be dragged anywhere. Push it off the side of the screen and it tucks into a small tab; tap the tab to bring it back.
 
 ---
 
 ## For developers
 
-Kotlin + Jetpack Compose (Material 3 Expressive), Glance for the widget, no backend. Data is two small JSON files on the device.
+Kotlin + Jetpack Compose (Material 3 Expressive), Glance for the widget, no backend. Data is three small JSON files on the device (goals, reminders, notes). Unit tests for the timing code: `./gradlew testDebugUnitTest`.
 
 Build with Android Studio, or from the command line with JDK 17+ and the Android SDK:
 
