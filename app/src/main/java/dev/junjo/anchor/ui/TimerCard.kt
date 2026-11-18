@@ -51,6 +51,9 @@ import dev.junjo.anchor.clockTime
 import dev.junjo.anchor.data.GoalStore
 import dev.junjo.anchor.formatDuration
 import dev.junjo.anchor.minutesText
+import dev.junjo.anchor.durationText
+import androidx.compose.foundation.clickable
+import androidx.compose.runtime.mutableStateOf
 import dev.junjo.anchor.timer.FocusTimer
 import dev.junjo.anchor.timer.FocusTimer.Status
 
@@ -80,9 +83,30 @@ private fun FocusSetup() {
     val ctx = LocalContext.current
     var focus by remember { mutableIntStateOf(AppPrefs.focusMinutes(ctx)) }
     var ready by remember { mutableIntStateOf(AppPrefs.readyMinutes(ctx)) }
-    fun changeFocus(by: Int) {
-        focus = (focus + by).coerceIn(AppPrefs.FOCUS_RANGE)
+    var picking by remember { mutableStateOf<String?>(null) }
+    fun setFocus(minutes: Int) {
+        focus = minutes.coerceIn(AppPrefs.FOCUS_RANGE)
         AppPrefs.setFocusMinutes(ctx, focus)
+    }
+    fun setReady(minutes: Int) {
+        ready = minutes.coerceIn(AppPrefs.FOCUS_RANGE)
+        AppPrefs.setReadyMinutes(ctx, ready)
+    }
+    // − and + move to the next multiple of 5, so 7 goes to 5 or 10.
+    fun step(up: Boolean) = setFocus(
+        if (up) (focus / AppPrefs.FOCUS_STEP + 1) * AppPrefs.FOCUS_STEP
+        else ((focus - 1) / AppPrefs.FOCUS_STEP * AppPrefs.FOCUS_STEP).coerceAtLeast(1),
+    )
+
+    when (picking) {
+        "focus" -> DurationDialog("Focus for", focus, onDismiss = { picking = null }, onPick = { setFocus(it); picking = null })
+        "ready" -> DurationDialog(
+            "Get ready for",
+            ready,
+            onDismiss = { picking = null },
+            onPick = { setReady(it); picking = null },
+            presets = listOf(1, 2, 3, 5, 10, 15),
+        )
     }
 
     Text("Focus", style = MaterialTheme.typography.titleLargeEmphasized)
@@ -94,19 +118,25 @@ private fun FocusSetup() {
     Spacer(Modifier.height(16.dp))
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
         FilledTonalIconButton(
-            onClick = { changeFocus(-AppPrefs.FOCUS_STEP) },
+            onClick = { step(up = false) },
             enabled = focus > AppPrefs.FOCUS_RANGE.first,
             shapes = IconButtonDefaults.shapes(),
             modifier = Modifier.size(56.dp),
         ) { Icon(painterResource(R.drawable.ic_remove), "Shorter") }
+        // Tap the number for any length, typed or picked.
         Text(
-            "$focus min",
-            style = MaterialTheme.typography.displaySmallEmphasized,
+            durationText(focus),
+            style = if (focus < 60) MaterialTheme.typography.displaySmallEmphasized else MaterialTheme.typography.headlineLargeEmphasized,
             textAlign = TextAlign.Center,
-            modifier = Modifier.width(168.dp),
+            maxLines = 1,
+            modifier = Modifier
+                .width(176.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .clickable(onClickLabel = "Pick a length") { picking = "focus" }
+                .padding(vertical = 8.dp),
         )
         FilledTonalIconButton(
-            onClick = { changeFocus(AppPrefs.FOCUS_STEP) },
+            onClick = { step(up = true) },
             enabled = focus < AppPrefs.FOCUS_RANGE.last,
             shapes = IconButtonDefaults.shapes(),
             modifier = Modifier.size(56.dp),
@@ -127,7 +157,7 @@ private fun FocusSetup() {
             shapes = ButtonDefaults.shapes(),
             modifier = tall.weight(1f),
             contentPadding = tallPadding,
-        ) { Text("Start in $ready min", style = MaterialTheme.typography.titleMedium) }
+        ) { Text("Start in ${durationText(ready)}", style = MaterialTheme.typography.titleMedium) }
     }
     Spacer(Modifier.height(8.dp))
     FlowRow(
@@ -139,10 +169,16 @@ private fun FocusSetup() {
         AppPrefs.READY_CHOICES.forEach { m ->
             FilterChip(
                 selected = ready == m,
-                onClick = { ready = m; AppPrefs.setReadyMinutes(ctx, m) },
+                onClick = { setReady(m) },
                 label = { Text("$m min") },
             )
         }
+        val custom = ready !in AppPrefs.READY_CHOICES
+        FilterChip(
+            selected = custom,
+            onClick = { picking = "ready" },
+            label = { Text(if (custom) durationText(ready) else "Other…") },
+        )
     }
 }
 

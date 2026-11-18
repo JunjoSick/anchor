@@ -71,8 +71,11 @@ object Reminders {
     }
 
     /** The next time this reminder is due, or null if it never is (no days picked). */
-    fun next(r: Reminder, now: ZonedDateTime = ZonedDateTime.now()): Long? =
-        if (r.repeatsByInterval) nextByInterval(r, now) else nextByDays(r, now)
+    fun next(r: Reminder, now: ZonedDateTime = ZonedDateTime.now()): Long? = when {
+        r.once -> r.startAt.takeIf { it > now.toInstant().toEpochMilli() }
+        r.repeatsByInterval -> nextByInterval(r, now)
+        else -> nextByDays(r, now)
+    }
 
     private fun nextByDays(r: Reminder, now: ZonedDateTime): Long? {
         for (i in 0..7L) {

@@ -44,10 +44,15 @@ data class Reminder(
      * minutes (a whole number of days and/or hours), counted from [startAt]; [days] is unused.
      */
     val everyMinutes: Int = 0,
-    /** For a repeat every few days or hours: the first time it goes off. */
+    /** For a repeat every few days or hours: the first time it goes off. For a one-off: when. */
     val startAt: Long = 0,
+    /** Goes off once, at [startAt] ("remind me in 40 minutes"), instead of repeating. */
+    val once: Boolean = false,
 ) {
-    val repeatsByInterval: Boolean get() = everyMinutes > 0
+    val repeatsByInterval: Boolean get() = !once && everyMinutes > 0
+
+    /** A one-off that has already gone off: no longer shown in the list. */
+    fun isPast(now: Long = System.currentTimeMillis()) = once && startAt <= now
 
     fun isOn(day: DayOfWeek) = days and (1 shl (day.value - 1)) != 0
 
@@ -55,7 +60,7 @@ data class Reminder(
         get() = LocalTime.of(hour, minute).format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT))
 
     val daysText: String
-        get() = if (repeatsByInterval) "${intervalText(everyMinutes)}, from $timeText" else when (days) {
+        get() = if (once) "Once" else if (repeatsByInterval) "${intervalText(everyMinutes)}, from $timeText" else when (days) {
             ALL_DAYS -> "Every day"
             WEEKDAYS -> "Weekdays"
             WEEKEND -> "Weekends"
@@ -77,6 +82,7 @@ data class Reminder(
         put("alarm", alarm)
         put("everyMinutes", everyMinutes)
         put("startAt", startAt)
+        put("once", once)
     }
 
     companion object {
@@ -88,6 +94,16 @@ data class Reminder(
         fun new(text: String, hour: Int, minute: Int, days: Int, addAsGoal: Boolean): Reminder {
             val now = System.currentTimeMillis()
             return Reminder(UUID.randomUUID().toString(), text, hour, minute, days, true, addAsGoal, now, now)
+        }
+
+        /** A one-off reminder at [at]. It still lands on the goal list when it goes off. */
+        fun once(text: String, at: Long, alarm: Boolean): Reminder {
+            val now = System.currentTimeMillis()
+            val time = java.time.Instant.ofEpochMilli(at).atZone(java.time.ZoneId.systemDefault())
+            return Reminder(
+                UUID.randomUUID().toString(), text.trim(), time.hour, time.minute, days = 0,
+                createdAt = now, updatedAt = now, alarm = alarm, startAt = at, once = true,
+            )
         }
 
         /**
@@ -118,6 +134,7 @@ data class Reminder(
             alarm = o.optBoolean("alarm", false),
             everyMinutes = o.optInt("everyMinutes", 0),
             startAt = o.optLong("startAt", 0),
+            once = o.optBoolean("once", false),
         )
 
         const val DAY_MINUTES = 24 * 60
@@ -149,13 +166,17 @@ object ReminderStore {
         if (::file.isInitialized) return
         appContext = context.applicationContext
         file = AtomicFile(File(appContext.filesDir, "reminders.json"))
-        _reminders.value = read()
+        // One-offs that went off over a day ago are finished with (a snooze is long over).
+        val cutoff = System.currentTimeMillis() - 24 * 60 * 60 * 1000L
+        _reminders.value = read().filter { !(it.once && it.startAt < cutoff) }
     }
 
     fun find(id: String): Reminder? = _reminders.value.firstOrNull { it.id == id }
 
-    /** Visible reminders, earliest in the day first. */
-    fun visible(): List<Reminder> = _reminders.value.filter { !it.deleted }.sortedWith(compareBy({ it.hour }, { it.minute }))
+    /** Visible reminders: one-offs still to come, soonest first, then the repeating ones by time of day. */
+    fun visible(list: List<Reminder> = _reminders.value, now: Long = System.currentTimeMillis()): List<Reminder> =
+        list.filter { !it.deleted && !it.isPast(now) }
+            .sortedWith(compareBy({ !it.once }, { if (it.once) it.startAt else 0L }, { it.hour }, { it.minute }))
 
     /** Adds the reminder, or replaces the one with the same id. */
     fun save(reminder: Reminder) {

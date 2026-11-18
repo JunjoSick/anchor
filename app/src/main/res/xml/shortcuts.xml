@@ -7,7 +7,7 @@
         android:shortcutId="add_goal"
         android:shortcutShortLabel="@string/shortcut_add">
         <intent
-            android:action="android.intent.action.VIEW"
+            android:action="dev.junjo.anchor.ADD_GOAL"
             android:targetClass="dev.junjo.anchor.QuickAddActivity"
             android:targetPackage="dev.junjo.anchor" />
     </shortcut>
@@ -19,6 +19,26 @@
         <intent
             android:action="dev.junjo.anchor.NEW_NOTE"
             android:targetClass="dev.junjo.anchor.QuickAddActivity"
+            android:targetPackage="dev.junjo.anchor" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutId="remind_in"
+        android:shortcutShortLabel="@string/shortcut_remind">
+        <intent
+            android:action="dev.junjo.anchor.REMIND"
+            android:targetClass="dev.junjo.anchor.QuickAddActivity"
+            android:targetPackage="dev.junjo.anchor" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutId="focus"
+        android:shortcutShortLabel="@string/shortcut_focus">
+        <intent
+            android:action="dev.junjo.anchor.OPEN_FOCUS"
+            android:targetClass="dev.junjo.anchor.MainActivity"
             android:targetPackage="dev.junjo.anchor" />
     </shortcut>
 </shortcuts>

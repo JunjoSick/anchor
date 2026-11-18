@@ -203,6 +203,17 @@ object FocusTimer {
         }
     }
 
+    /**
+     * When the app starts: if an end was missed (the app opened before the phone finished
+     * starting up, or an alarm came late), move on now instead of showing 0:00.
+     */
+    fun catchUp() {
+        // A minute's grace: the app is often started *by* the end alarm, which must still ring.
+        if (afterRestart(_state.value, now() - CATCH_UP_GRACE) != _state.value) restore()
+    }
+
+    private const val CATCH_UP_GRACE = MINUTE
+
     // The timing decisions, kept free of Android so they can be unit tested.
 
     /** When each alarm should go off; null for a heads-up that isn't wanted or is too close to schedule. */

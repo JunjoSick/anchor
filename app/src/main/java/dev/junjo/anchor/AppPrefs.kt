@@ -13,7 +13,7 @@ object AppPrefs {
     private const val READY_MINUTES = "ready_minutes"
 
     const val FOCUS_STEP = 5
-    val FOCUS_RANGE = 5..180
+    val FOCUS_RANGE = 1..(23 * 60 + 59)
     val READY_CHOICES = listOf(2, 5, 10)
 
     private fun prefs(ctx: Context) =

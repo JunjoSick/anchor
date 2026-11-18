@@ -14,6 +14,9 @@ import androidx.glance.Image
 import androidx.glance.ImageProvider
 import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionParametersOf
+import android.content.Intent
+import androidx.glance.LocalContext
+import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
@@ -100,12 +103,37 @@ private fun WidgetContent(goals: List<Goal>, timer: FocusTimer.State) {
             )
             TimerChip(timer)
             Spacer(GlanceModifier.width(8.dp))
+            val ctx = LocalContext.current
+            Box(
+                GlanceModifier
+                    .size(36.dp)
+                    .cornerRadius(18.dp)
+                    .background(GlanceTheme.colors.secondaryContainer)
+                    .clickable(
+                        actionStartActivity(
+                            Intent(ctx, QuickAddActivity::class.java).setAction(QuickAddActivity.ACTION_NEW_NOTE),
+                        ),
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    ImageProvider(R.drawable.ic_note),
+                    contentDescription = "Write something down",
+                    colorFilter = ColorFilter.tint(GlanceTheme.colors.onSecondaryContainer),
+                    modifier = GlanceModifier.size(20.dp),
+                )
+            }
+            Spacer(GlanceModifier.width(6.dp))
             Box(
                 GlanceModifier
                     .size(36.dp)
                     .cornerRadius(18.dp)
                     .background(GlanceTheme.colors.primary)
-                    .clickable(actionStartActivity<QuickAddActivity>()),
+                    .clickable(
+                        actionStartActivity(
+                            Intent(ctx, QuickAddActivity::class.java).setAction(QuickAddActivity.ACTION_ADD_GOAL),
+                        ),
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 Image(

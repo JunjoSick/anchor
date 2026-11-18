@@ -283,7 +283,7 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
                         onTuck = { tuck(if (leftX() + width() / 2 > screenWidth() / 2) Dock.RIGHT else Dock.LEFT) },
                         onAdd = {
                             showList(false)
-                            open(Intent(this@FloatingGoalsService, QuickAddActivity::class.java))
+                            open(Intent(this@FloatingGoalsService, QuickAddActivity::class.java).setAction(QuickAddActivity.ACTION_ADD_GOAL))
                         },
                         onOpenApp = {
                             showList(false)

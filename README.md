@@ -7,9 +7,9 @@ The idea is simple: the problem usually isn't *knowing* what to do, it's remembe
 ## What it does
 
 - **Goals that stay in sight:** a home-screen widget, the lock screen, and an optional little bubble that floats over every app with your top goal. Tap a goal to tick it off.
-- **Add a goal or a note in two seconds:** from the widget, a Quick Settings button, the app icon (long-press it for "New note"), or straight from the notification. The keyboard is already open.
-- **Focus timer:** pick how long, then start now or **"Start in 5 min"**: a short get-ready countdown, after which focus begins by itself. A shrinking disc so you *see* time passing, a nudge halfway and 5 minutes before the end, and an alarm that keeps ringing until you tap Done. On Android 16 it's a **Live Update**: the countdown sits in the status bar, with a progress bar on top of your notifications.
-- **Reminders:** meds, water, bedtime. On set days, or **every few days or hours**. Quiet ones are a normal notification; important ones can **ring like an alarm** until you answer. When one goes off it stays on your goal list until you tick it off, so it can't get swiped away and forgotten.
+- **Catch it in two seconds:** the **+** button on every page offers *Goal*, *Write something down*, *Remind me in…* and *Focus*. The same are on the widget, in Quick Settings buttons, and when you long-press the app icon. The keyboard is already open.
+- **Focus timer:** pick any length (tap the number to type it), then start now or **"Start in 5 min"**: a short get-ready countdown, after which focus begins by itself. A shrinking disc so you *see* time passing, a nudge halfway and 5 minutes before the end, and an alarm that keeps ringing until you tap Done. On Android 16 it's a **Live Update**: the countdown sits in the status bar, with a progress bar on top of your notifications.
+- **Reminders:** meds, water, bedtime. On set days, or **every few days or hours**, or just once: **"Remind me in 40 min"**. Quiet ones are a normal notification; important ones can **ring like an alarm** until you answer. When one goes off it stays on your goal list until you tick it off, so it can't get swiped away and forgotten.
 - **Notes:** for things that aren't tasks: thoughts, ideas, stuff to look up. One that turns out to be a task becomes a goal with one tap.
 - **No guilt:** unfinished goals from yesterday ask once: keep or drop. Dropping is fine.
 - **Light on battery:** nothing runs while the screen is off.
@@ -28,12 +28,12 @@ To update later, tap the same download link again and install it over the old on
 
 ## First-time setup (2 minutes)
 
-The app shows a **Setup** card with buttons for each of these. Do the ones you like:
+The app has four pages: **Today** (your goals), **Focus**, **Reminders** and **Notes**. On Today, a **Setup** card has buttons for each of these. Do the ones you like:
 
 - **Put your goals on the home screen** adds the widget.
 - **Keep a goal floating on screen** turns on the bubble. Android asks you to allow *Display over other apps*: find Anchor in the list and switch it on.
 - **Keep timers on time:** some phones (Samsung, Xiaomi, OnePlus…) pause apps to save battery, which can make timers late. Allow it if you have one of those.
-- At the bottom of the app: **Add an "Add goal" button to Quick Settings** puts a one-tap button in the pull-down menu.
+- Under ⚙ (top right of Today): buttons to put **Add goal** and **Write it down** in the pull-down Quick Settings menu.
 
 ## Tips
 

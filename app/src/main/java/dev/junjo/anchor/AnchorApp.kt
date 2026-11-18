@@ -20,6 +20,7 @@ class AnchorApp : Application() {
         Notifications.createChannels(this)
         GoalStore.init(this)
         FocusTimer.init(this)
+        FocusTimer.catchUp()
         ReminderStore.init(this)
         NoteStore.init(this)
         // Cheap, and makes sure no reminder is ever left without its alarm.

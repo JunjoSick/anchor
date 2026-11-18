@@ -88,7 +88,15 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.junjo.anchor.AppPrefs
+import dev.junjo.anchor.QuickAddActivity
+import dev.junjo.anchor.durationText
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import dev.junjo.anchor.QuickAddTileService
+import dev.junjo.anchor.NoteTileService
 import dev.junjo.anchor.R
 import dev.junjo.anchor.data.Goal
 import dev.junjo.anchor.data.GoalStore
@@ -111,14 +119,12 @@ private val DONE_MESSAGES = listOf("Done ✓", "Nice, that's done", "Ticked off 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun HomeScreen(bottomBar: @Composable () -> Unit = {}) {
+fun HomeScreen(bottomBar: @Composable () -> Unit = {}, fab: @Composable () -> Unit = {}) {
     val ctx = LocalContext.current
     val view = LocalView.current
     val goals by GoalStore.goals.collectAsStateWithLifecycle()
     val timer by FocusTimer.state.collectAsStateWithLifecycle()
-    val reminders by ReminderStore.reminders.collectAsStateWithLifecycle()
-    var sheetOpen by remember { mutableStateOf(false) }
-    var editing by remember { mutableStateOf<Reminder?>(null) }
+    var settingsOpen by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -164,7 +170,7 @@ fun HomeScreen(bottomBar: @Composable () -> Unit = {}) {
 
     fun startFor(goal: Goal, ready: Int, focus: Int) {
         FocusTimer.startAfter(ready, focus, goal.text, goal.id)
-        val message = if (ready > 0) "Focus starts in $ready min" else "Timer started: $focus min"
+        val message = if (ready > 0) "Focus starts in ${durationText(ready)}" else "Focus started: ${durationText(focus)}"
         scope.launch { snackbar.showSnackbar(message) }
     }
 
@@ -173,9 +179,6 @@ fun HomeScreen(bottomBar: @Composable () -> Unit = {}) {
     val carried = remember(active, today) { active.filter { it.day < today } }
     val current = remember(active, today) { active.filter { it.day >= today } }
     val done = remember(goals, today) { goals.doneToday() }
-    val visibleReminders = remember(reminders) {
-        reminders.filter { !it.deleted }.sortedWith(compareBy({ it.hour }, { it.minute }))
-    }
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
@@ -193,10 +196,16 @@ fun HomeScreen(bottomBar: @Composable () -> Unit = {}) {
                         },
                     )
                 },
+                actions = {
+                    IconButton(onClick = { settingsOpen = true }, shapes = IconButtonDefaults.shapes()) {
+                        Icon(painterResource(R.drawable.ic_settings), contentDescription = "Settings")
+                    }
+                },
                 scrollBehavior = scrollBehavior,
             )
         },
         bottomBar = bottomBar,
+        floatingActionButton = fab,
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         LazyColumn(
@@ -252,6 +261,7 @@ fun HomeScreen(bottomBar: @Composable () -> Unit = {}) {
                     modifier = Modifier.animateItem(),
                     onDone = { complete(goal) },
                     onStart = { ready, focus -> startFor(goal, ready, focus) },
+                    onRemind = { QuickAddActivity.open(ctx, QuickAddActivity.Kind.REMIND, goal.text) },
                     onDelete = { remove(goal) },
                 )
             }
@@ -287,24 +297,16 @@ fun HomeScreen(bottomBar: @Composable () -> Unit = {}) {
                 }
             }
 
-            remindersSection(
-                reminders = visibleReminders,
-                onAdd = { editing = null; sheetOpen = true },
-                onEdit = { editing = it; sheetOpen = true },
-            )
-
-            if (!timer.isActive) {
-                item(key = "timer") { TimerCard(timer, Modifier.animateItem().padding(top = 24.dp)) }
-            }
-
-            item(key = "settings") { SettingsSection(refresh = resumes, onShowSetup = { resumes++ }) }
+            // Room for the + button, so it never covers the last goal.
+            item(key = "fab-space") { Spacer(Modifier.height(72.dp)) }
         }
     }
 
-    if (sheetOpen) {
-        // Keyed so opening a different reminder starts the sheet fresh.
-        androidx.compose.runtime.key(editing?.id) {
-            ReminderSheet(initial = editing, onDismiss = { sheetOpen = false })
+    if (settingsOpen) {
+        ModalBottomSheet(onDismissRequest = { settingsOpen = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).navigationBarsPadding().padding(bottom = 16.dp)) {
+                SettingsSection(refresh = resumes, onShowSetup = { resumes++; settingsOpen = false })
+            }
         }
     }
 }
@@ -382,6 +384,7 @@ private fun GoalRow(
     modifier: Modifier,
     onDone: () -> Unit,
     onStart: (ready: Int, focus: Int) -> Unit,
+    onRemind: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -411,11 +414,12 @@ private fun GoalRow(
                     val focus = remember { AppPrefs.focusMinutes(ctx) }
                     val ready = remember { AppPrefs.readyMinutes(ctx) }
                     DropdownMenuItem(text = { Text("Just start · 5 min") }, onClick = { menu = false; onStart(0, 5) })
-                    DropdownMenuItem(text = { Text("Focus · $focus min") }, onClick = { menu = false; onStart(0, focus) })
+                    DropdownMenuItem(text = { Text("Focus · ${durationText(focus)}") }, onClick = { menu = false; onStart(0, focus) })
                     DropdownMenuItem(
-                        text = { Text("Get ready $ready min, then focus") },
+                        text = { Text("Get ready ${durationText(ready)}, then focus") },
                         onClick = { menu = false; onStart(ready, focus) },
                     )
+                    DropdownMenuItem(text = { Text("Remind me about this in…") }, onClick = { menu = false; onRemind() })
                     HorizontalDivider()
                     DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; onDelete() })
                 }
@@ -573,7 +577,7 @@ private fun SettingsSection(refresh: Int, onShowSetup: () -> Unit) {
     val ctx = LocalContext.current
     var goalsNotification by remember { mutableStateOf(AppPrefs.goalsNotification(ctx)) }
     var bubble by remember(refresh) { mutableStateOf(FloatingGoals.isOn(ctx)) }
-    Column(Modifier.padding(top = 32.dp)) {
+    Column(Modifier.padding(top = 8.dp)) {
         Text(
             "Always in sight",
             style = MaterialTheme.typography.titleMediumEmphasized,
@@ -601,8 +605,11 @@ private fun SettingsSection(refresh: Int, onShowSetup: () -> Unit) {
         }
         Spacer(Modifier.height(8.dp))
         if (Build.VERSION.SDK_INT >= 33) {
-            TextButton(onClick = { requestTile(ctx) }, shapes = ButtonDefaults.shapes()) {
+            TextButton(onClick = { requestTile(ctx, QuickAddTileService::class.java, R.string.tile_label, R.drawable.ic_add) }, shapes = ButtonDefaults.shapes()) {
                 Text("Add an “Add goal” button to Quick Settings")
+            }
+            TextButton(onClick = { requestTile(ctx, NoteTileService::class.java, R.string.note_tile_label, R.drawable.ic_note) }, shapes = ButtonDefaults.shapes()) {
+                Text("Add a “Write it down” button to Quick Settings")
             }
         }
         if (AppPrefs.setupHidden(ctx)) {
@@ -637,11 +644,11 @@ private fun SettingRow(
 }
 
 @RequiresApi(33)
-private fun requestTile(ctx: Context) {
+private fun requestTile(ctx: Context, tile: Class<*>, label: Int, icon: Int) {
     ctx.getSystemService(StatusBarManager::class.java).requestAddTileService(
-        ComponentName(ctx, QuickAddTileService::class.java),
-        ctx.getString(R.string.tile_label),
-        SystemIcon.createWithResource(ctx, R.drawable.ic_add),
+        ComponentName(ctx, tile),
+        ctx.getString(label),
+        SystemIcon.createWithResource(ctx, icon),
         ctx.mainExecutor,
     ) { }
 }

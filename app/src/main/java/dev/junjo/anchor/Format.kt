@@ -21,4 +21,15 @@ fun clockTime(epochMs: Long): String =
     DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
         .format(Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()))
 
-fun minutesText(ms: Long): String = "${(ms + 30_000) / 60_000} min"
+fun minutesText(ms: Long): String = durationText(((ms + 30_000) / 60_000).toInt())
+
+/** 45 min, 1 h, 1 h 20 min. */
+fun durationText(minutes: Int): String {
+    val h = minutes / 60
+    val m = minutes % 60
+    return when {
+        h == 0 -> "$m min"
+        m == 0 -> "$h h"
+        else -> "$h h $m min"
+    }
+}

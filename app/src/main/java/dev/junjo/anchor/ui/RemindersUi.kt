@@ -71,37 +71,18 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-/** The "Daily reminders" part of the main list. */
+/** The list of reminders: one-offs still to come first, then the repeating ones. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 fun LazyListScope.remindersSection(
     reminders: List<Reminder>,
-    onAdd: () -> Unit,
     onEdit: (Reminder) -> Unit,
 ) {
-    item(key = "reminders-header") {
-        Row(
-            Modifier.animateItem().fillMaxWidth().padding(top = 28.dp, bottom = 8.dp, start = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "Reminders",
-                style = MaterialTheme.typography.titleMediumEmphasized,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.weight(1f),
-            )
-            FilledTonalButton(onClick = onAdd, shapes = ButtonDefaults.shapes()) {
-                Icon(painterResource(R.drawable.ic_add), contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Add")
-            }
-        }
-    }
     if (reminders.isEmpty()) {
         item(key = "reminders-empty") {
             Text(
-                "For things that come back, like meds, water or winding down for bed: on set days, or every few days or hours. " +
-                    "When one goes off it lands on your goal list and stays there until you tick it off. " +
-                    "Can't miss it? Make it ring like an alarm.",
+                "Repeating reminders are for things that come back, like meds, water or winding down for bed: " +
+                    "on set days, or every few days or hours. \"Remind me in…\" is for a one-off, like a call in 40 minutes. " +
+                    "When one goes off it lands on your goal list until you tick it off. Can't miss it? Make it ring like an alarm.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.animateItem().padding(horizontal = 8.dp),
@@ -119,13 +100,17 @@ private fun ReminderRow(r: Reminder, shape: androidx.compose.ui.graphics.Shape, 
     val dim = if (r.enabled) 1f else 0.5f
     Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainer, modifier = modifier.fillMaxWidth()) {
         Row(
-            Modifier.clickable(onClick = onEdit).padding(start = 20.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+            Modifier.clickable(enabled = !r.once, onClick = onEdit).padding(start = 20.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        if (r.repeatsByInterval) Reminders.next(r)?.let { "Next ${whenText(it)}" } ?: r.timeText else r.timeText,
+                        when {
+                            r.once -> whenText(r.startAt)
+                            r.repeatsByInterval -> Reminders.next(r)?.let { "Next ${whenText(it)}" } ?: r.timeText
+                            else -> r.timeText
+                        },
                         style = MaterialTheme.typography.headlineSmallEmphasized,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = dim),
                     )
@@ -153,7 +138,12 @@ private fun ReminderRow(r: Reminder, shape: androidx.compose.ui.graphics.Shape, 
                 )
             }
             Spacer(Modifier.width(12.dp))
-            Switch(checked = r.enabled, onCheckedChange = { ReminderStore.save(r.copy(enabled = it)) })
+            // A one-off has nothing to switch off for later: it's either coming, or cancelled.
+            if (r.once) {
+                TextButton(onClick = { ReminderStore.delete(r.id) }, shapes = ButtonDefaults.shapes()) { Text("Cancel") }
+            } else {
+                Switch(checked = r.enabled, onCheckedChange = { ReminderStore.save(r.copy(enabled = it)) })
+            }
         }
     }
 }
@@ -361,7 +351,7 @@ private fun Stepper(before: String, value: Int, after: String, range: IntRange, 
 }
 
 /** "today 14:00", "tomorrow 9:00" or "Thu 20 Nov 9:00". */
-private fun whenText(epochMs: Long): String {
+fun whenText(epochMs: Long): String {
     val zone = ZoneId.systemDefault()
     val date = Instant.ofEpochMilli(epochMs).atZone(zone).toLocalDate()
     val today = LocalDate.now(zone)

@@ -74,7 +74,7 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun NotesScreen(bottomBar: @Composable () -> Unit) {
+fun NotesScreen(bottomBar: @Composable () -> Unit, fab: @Composable () -> Unit = {}) {
     val all by NoteStore.notes.collectAsStateWithLifecycle()
     val notes = remember(all) { all.visible() }
     var editing by remember { mutableStateOf<Note?>(null) }
@@ -99,6 +99,7 @@ fun NotesScreen(bottomBar: @Composable () -> Unit) {
             )
         },
         bottomBar = bottomBar,
+        floatingActionButton = fab,
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         LazyColumn(
@@ -107,7 +108,7 @@ fun NotesScreen(bottomBar: @Composable () -> Unit) {
                 start = 16.dp,
                 end = 16.dp,
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 32.dp,
+                bottom = padding.calculateBottomPadding() + 96.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
@@ -192,7 +193,7 @@ private fun NotesEmpty(modifier: Modifier) {
         Text("Get it out of your head", style = MaterialTheme.typography.titleLargeEmphasized)
         Text(
             "A thought, an idea, something to look up later. It doesn't have to be a task. " +
-                "Long-press the app icon for “New note” from anywhere.",
+                "Long-press the app icon for “Write it down” from anywhere.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
