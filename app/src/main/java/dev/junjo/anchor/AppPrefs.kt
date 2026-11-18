@@ -13,7 +13,7 @@ object AppPrefs {
     private const val READY_MINUTES = "ready_minutes"
 
     /** Quick picks in the focus sheet, in minutes; "Other…" covers the rest. */
-    val FOCUS_PRESETS = listOf(5, 25, 45)
+    val FOCUS_PRESETS = listOf(5, 15, 25, 45)
     val FOCUS_RANGE = 1..(23 * 60 + 59)
     val READY_CHOICES = listOf(2, 5, 10)
 

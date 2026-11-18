@@ -1,5 +1,9 @@
 package dev.junjo.anchor
 
+import androidx.compose.material3.FilledTonalIconToggleButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.foundation.layout.heightIn
+import dev.junjo.anchor.ui.DurationRow
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
@@ -15,7 +19,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -34,13 +37,11 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SplitButtonDefaults
 import androidx.compose.material3.SplitButtonLayout
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -146,7 +147,7 @@ class QuickAddActivity : ComponentActivity() {
 }
 
 /** "Remind me in" quick picks, in minutes. */
-private val REMIND_IN = listOf(10, 30, 60, 120, 240)
+private val REMIND_IN = listOf(10, 30, 60, 120)
 
 /** The shared shell: a dimmed backdrop that closes on tap, and a sheet rising from the bottom. */
 @Composable
@@ -262,36 +263,39 @@ private fun AddContent(kind: QuickAddActivity.Kind, initialText: String, onClose
 
     if (remind) {
         Spacer(Modifier.height(12.dp))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            REMIND_IN.forEach { m ->
-                FilterChip(selected = inMinutes == m, onClick = { inMinutes = m }, label = { Text("in ${durationText(m)}") })
-            }
-            val custom = inMinutes !in REMIND_IN
-            FilterChip(
-                selected = custom,
-                onClick = { picking = true },
-                label = { Text(if (custom) "in ${durationText(inMinutes)}" else "Other…") },
-            )
-        }
-        Row(
-            Modifier.fillMaxWidth().clickable { alarm = !alarm }.padding(start = 4.dp, top = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Ring like an alarm", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-            Spacer(Modifier.width(12.dp))
-            Switch(checked = alarm, onCheckedChange = { alarm = it })
-        }
+        DurationRow(REMIND_IN, inMinutes, onSelect = { inMinutes = it }, onOther = { picking = true }, prefix = "In ")
     }
 
     Spacer(Modifier.height(12.dp))
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-        if (!remind) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (remind) {
+            // Quiet by default; the bell makes it ring like an alarm, and the button says so.
+            FilledTonalIconToggleButton(
+                checked = alarm,
+                onCheckedChange = { alarm = it },
+                shapes = IconButtonDefaults.toggleableShapes(),
+                modifier = Modifier.size(48.dp),
+            ) {
+                Icon(
+                    painterResource(if (alarm) R.drawable.ic_bell_ring else R.drawable.ic_bell),
+                    contentDescription = "Ring like an alarm",
+                )
+            }
+            Spacer(Modifier.weight(1f))
+        } else {
+            Spacer(Modifier.weight(1f))
             TextButton(onClick = { save() }, enabled = text.isNotBlank(), shapes = ButtonDefaults.shapes()) {
                 Text("Save, add another")
             }
         }
-        Button(onClick = { if (save()) onClose() }, enabled = text.isNotBlank(), shapes = ButtonDefaults.shapes()) {
-            Text(if (remind) "Remind me at ${clockTime(at())}" else "Save")
+        Button(onClick = { if (save()) onClose() }, enabled = text.isNotBlank(), shapes = ButtonDefaults.shapes(), modifier = Modifier.heightIn(min = 48.dp)) {
+            Text(
+                when {
+                    !remind -> "Save"
+                    alarm -> "Ring at ${clockTime(at())}"
+                    else -> "Remind me at ${clockTime(at())}"
+                },
+            )
         }
     }
 }
@@ -328,22 +332,11 @@ private fun FocusContent(label: String?, goalId: String?, onClose: () -> Unit) {
             ready,
             onDismiss = { picking = null },
             onPick = { picking = null; go(it.coerceIn(AppPrefs.FOCUS_RANGE)) },
-            presets = listOf(1, 2, 3, 5, 10, 15),
         )
     }
 
     SheetTitle(label ?: "Focus")
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        AppPrefs.FOCUS_PRESETS.forEach { m ->
-            FilterChip(selected = focus == m, onClick = { focus = m }, label = { Text(durationText(m)) })
-        }
-        val custom = focus !in AppPrefs.FOCUS_PRESETS
-        FilterChip(
-            selected = custom,
-            onClick = { picking = "focus" },
-            label = { Text(if (custom) durationText(focus) else "Other…") },
-        )
-    }
+    DurationRow(AppPrefs.FOCUS_PRESETS, focus, onSelect = { focus = it }, onOther = { picking = "focus" }, prefix = "Focus for ")
     if (timer.isActive) {
         Text(
             "Replaces the timer that's running.",
