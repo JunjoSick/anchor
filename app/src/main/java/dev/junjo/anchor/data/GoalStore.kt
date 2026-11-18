@@ -56,6 +56,12 @@ object GoalStore {
 
     fun find(id: String): Goal? = _goals.value.firstOrNull { it.id == id }
 
+    /** Changes a goal's text. Blank text leaves it as it was. */
+    fun rename(id: String, text: String) {
+        val clean = text.trim().replace(Regex("\\s+"), " ")
+        if (clean.isNotEmpty()) edit(id) { it.copy(text = clean, updatedAt = System.currentTimeMillis()) }
+    }
+
     fun setDone(id: String, done: Boolean) =
         edit(id) { it.copy(doneAt = if (done) it.doneAt ?: System.currentTimeMillis() else null) }
 

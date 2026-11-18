@@ -12,8 +12,8 @@ android {
         // Android 12: dynamic colours, exact-alarm permission model and modern widgets are all there.
         minSdk = 31
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
     }
 
     buildTypes {

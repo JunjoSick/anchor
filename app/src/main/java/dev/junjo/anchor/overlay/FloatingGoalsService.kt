@@ -281,9 +281,9 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
                         gestures = BubbleGestures(::dragStart, ::dragMove, ::dragEnd),
                         onUntuck = ::untuck,
                         onTuck = { tuck(if (leftX() + width() / 2 > screenWidth() / 2) Dock.RIGHT else Dock.LEFT) },
-                        onAdd = {
+                        onAdd = { kind ->
                             showList(false)
-                            open(Intent(this@FloatingGoalsService, QuickAddActivity::class.java).setAction(QuickAddActivity.ACTION_ADD_GOAL))
+                            QuickAddActivity.open(this@FloatingGoalsService, kind)
                         },
                         onOpenApp = {
                             showList(false)
@@ -500,7 +500,7 @@ private fun Bubble(
     gestures: BubbleGestures,
     onUntuck: () -> Unit,
     onTuck: () -> Unit,
-    onAdd: () -> Unit,
+    onAdd: (QuickAddActivity.Kind) -> Unit,
     onOpenApp: () -> Unit,
 ) {
     val goals by GoalStore.goals.collectAsState()
@@ -513,13 +513,13 @@ private fun Bubble(
         dock != Dock.NONE -> EdgeTab(dock, active, timer, Modifier.bubbleDrag(gestures, onTap = onUntuck))
         // Padding leaves room for the shadow inside the overlay window.
         expanded -> Box(Modifier.padding(8.dp)) {
-            ExpandedList(active, timer, Modifier.bubbleDrag(gestures), onCollapse = { onExpand(false) }, onAdd, onOpenApp, onTuck)
+            ExpandedList(active, timer, Modifier.bubbleDrag(gestures), onAdd, onOpenApp, onTuck)
         }
         else -> Box(Modifier.padding(8.dp)) {
             Pill(
                 active,
                 timer,
-                Modifier.bubbleDrag(gestures, onTap = { if (active.isEmpty() && !timer.isActive) onAdd() else onExpand(true) }),
+                Modifier.bubbleDrag(gestures, onTap = { onExpand(true) }),
             )
         }
     }
@@ -629,9 +629,9 @@ private fun Pill(active: List<Goal>, timer: FocusTimer.State, touch: Modifier) {
                     }
                 }
                 else -> {
-                    Icon(painterResource(R.drawable.ic_add), contentDescription = "Add goal", modifier = Modifier.size(22.dp))
+                    Icon(painterResource(R.drawable.ic_add), contentDescription = null, modifier = Modifier.size(22.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Goal", style = MaterialTheme.typography.titleSmall)
+                    Text("Add", style = MaterialTheme.typography.titleSmall)
                 }
             }
         }
@@ -644,8 +644,7 @@ private fun ExpandedList(
     active: List<Goal>,
     timer: FocusTimer.State,
     drag: Modifier,
-    onCollapse: () -> Unit,
-    onAdd: () -> Unit,
+    onAdd: (QuickAddActivity.Kind) -> Unit,
     onOpenApp: () -> Unit,
     onTuck: () -> Unit,
 ) {
@@ -664,9 +663,7 @@ private fun ExpandedList(
                     style = MaterialTheme.typography.titleMediumEmphasized,
                     modifier = drag.weight(1f).padding(start = 8.dp, top = 12.dp, bottom = 12.dp),
                 )
-                IconButton(onClick = onCollapse, shapes = IconButtonDefaults.shapes()) {
-                    Icon(painterResource(R.drawable.ic_remove), contentDescription = "Fold up")
-                }
+                TextButton(onClick = onTuck, shapes = ButtonDefaults.shapes()) { Text("Tuck away") }
             }
 
             if (timer.isActive) {
@@ -678,16 +675,31 @@ private fun ExpandedList(
                     Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         val now = rememberNow(active = timer.status == Status.RUNNING, alignTo = timer.endAt)
                         val fraction = if (timer.totalMs > 0) timer.remaining(now).toFloat() / timer.totalMs else 0f
-                        TimerDisc(fraction, Modifier.size(28.dp))
+                        TimerDisc(fraction, Modifier.size(28.dp), ready = timer.isGettingReady)
                         Spacer(Modifier.width(10.dp))
                         Text(
                             if (timer.status == Status.RINGING) "Time's up" else formatDuration(timer.remaining(now)),
                             style = MaterialTheme.typography.titleMediumEmphasized,
                             modifier = Modifier.weight(1f),
                         )
-                        TextButton(onClick = { FocusTimer.addMinutes(5) }, shapes = ButtonDefaults.shapes()) { Text("+5") }
-                        TextButton(onClick = { FocusTimer.stop() }, shapes = ButtonDefaults.shapes()) {
-                            Text(if (timer.status == Status.RINGING) "Done" else "Stop")
+                        // The same buttons as the timer card in the app.
+                        when {
+                            timer.status == Status.RINGING -> {
+                                TextButton(onClick = { FocusTimer.addMinutes(5) }, shapes = ButtonDefaults.shapes()) { Text("+5") }
+                                TextButton(onClick = { FocusTimer.stop() }, shapes = ButtonDefaults.shapes()) { Text("Done") }
+                            }
+                            timer.isGettingReady -> TextButton(onClick = { FocusTimer.startNow() }, shapes = ButtonDefaults.shapes()) { Text("Start now") }
+                            timer.status == Status.PAUSED -> IconButton(onClick = { FocusTimer.resume() }, shapes = IconButtonDefaults.shapes()) {
+                                Icon(painterResource(R.drawable.ic_play), contentDescription = "Resume")
+                            }
+                            else -> IconButton(onClick = { FocusTimer.pause() }, shapes = IconButtonDefaults.shapes()) {
+                                Icon(painterResource(R.drawable.ic_pause), contentDescription = "Pause")
+                            }
+                        }
+                        if (timer.status != Status.RINGING) {
+                            IconButton(onClick = { FocusTimer.stop() }, shapes = IconButtonDefaults.shapes()) {
+                                Icon(painterResource(R.drawable.ic_close), contentDescription = "Stop")
+                            }
                         }
                     }
                 }
@@ -740,15 +752,20 @@ private fun ExpandedList(
             }
 
             Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                FilledTonalButton(onClick = onAdd, shapes = ButtonDefaults.shapes()) {
+            // The same two ways in as the app's + menu: a goal to tick off, or a note to keep.
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(onClick = { onAdd(QuickAddActivity.Kind.GOAL) }, shapes = ButtonDefaults.shapes()) {
                     Icon(painterResource(R.drawable.ic_add), contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Add")
+                    Text("Goal")
                 }
-                TextButton(onClick = onOpenApp, shapes = ButtonDefaults.shapes()) { Text("Open app") }
+                FilledTonalButton(onClick = { onAdd(QuickAddActivity.Kind.NOTE) }, shapes = ButtonDefaults.shapes()) {
+                    Icon(painterResource(R.drawable.ic_note), contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Note")
+                }
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = onTuck, shapes = ButtonDefaults.shapes()) { Text("Tuck away") }
+                TextButton(onClick = onOpenApp, shapes = ButtonDefaults.shapes()) { Text("Open") }
             }
         }
     }

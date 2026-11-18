@@ -102,28 +102,21 @@ class FocusTimerTest {
         assertEquals(paused, FocusTimer.afterRestart(paused, now + 60 * MINUTE))
     }
 
-    @Test fun progressBarCoversTheWholeSession() {
+    @Test fun progressBarShowsOnePartAtATime() {
+        // Getting ready: the bar fills up to the start.
         val ready = gettingReady(5, 25, endsIn = 2 * MINUTE)
-        val b = TimerNotifications.bar(ready, now)
-        assertEquals(listOf(TimerNotifications.Part.READY to 300, TimerNotifications.Part.FOCUS to 1500), b.segments)
-        assertEquals(180, b.progress)
-        assertEquals(listOf(300 + 750, 300 + 1200), b.marks)
+        assertEquals(TimerNotifications.Bar(300, 180), TimerNotifications.bar(ready, now))
 
-        // Ten minutes into the focus that followed: both segments still drawn, past getting ready.
+        // Ten minutes into the focus that followed: a fresh bar for the focus block alone.
         val focus = FocusTimer.focusAfterReady(ready, now - 10 * MINUTE)
-        val f = TimerNotifications.bar(focus, now)
-        assertEquals(b.segments, f.segments)
-        assertEquals(300 + 600, f.progress)
-        assertEquals(b.marks, f.marks)
+        assertEquals(TimerNotifications.Bar(1500, 600), TimerNotifications.bar(focus, now))
 
-        // A plain timer: one segment; a short one has no marks.
-        val plain = TimerNotifications.bar(running(5, endsIn = MINUTE), now)
-        assertEquals(listOf(TimerNotifications.Part.FOCUS to 300), plain.segments)
-        assertEquals(240, plain.progress)
-        assertEquals(emptyList<Int>(), plain.marks)
+        // A plain timer.
+        assertEquals(TimerNotifications.Bar(300, 240), TimerNotifications.bar(running(5, endsIn = MINUTE), now))
 
-        // Paused keeps its place.
+        // Paused keeps its place; past the end it stays full.
         assertEquals(1500 - 420, TimerNotifications.bar(State(Status.PAUSED, 25 * MINUTE, remainingMs = 7 * MINUTE), now).progress)
+        assertEquals(TimerNotifications.Bar(300, 300), TimerNotifications.bar(running(5, endsIn = -MINUTE), now))
     }
 
     @Test fun afterRestart() {

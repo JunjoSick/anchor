@@ -37,8 +37,8 @@
         android:shortcutId="focus"
         android:shortcutShortLabel="@string/shortcut_focus">
         <intent
-            android:action="dev.junjo.anchor.OPEN_FOCUS"
-            android:targetClass="dev.junjo.anchor.MainActivity"
+            android:action="dev.junjo.anchor.FOCUS"
+            android:targetClass="dev.junjo.anchor.QuickAddActivity"
             android:targetPackage="dev.junjo.anchor" />
     </shortcut>
 </shortcuts>

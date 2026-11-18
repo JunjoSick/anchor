@@ -1,5 +1,19 @@
 package dev.junjo.anchor.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material3.FloatingActionButtonMenu
+import androidx.compose.material3.FloatingActionButtonMenuItem
+import androidx.compose.material3.ToggleFloatingActionButton
+import androidx.compose.runtime.key
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.style.TextOverflow
+import dev.junjo.anchor.data.Note
+import dev.junjo.anchor.data.NoteStore
+import dev.junjo.anchor.data.visible
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationManager
@@ -27,22 +41,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -58,8 +67,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
@@ -74,13 +81,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
@@ -89,7 +93,6 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.junjo.anchor.AppPrefs
 import dev.junjo.anchor.QuickAddActivity
-import dev.junjo.anchor.durationText
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -100,8 +103,6 @@ import dev.junjo.anchor.NoteTileService
 import dev.junjo.anchor.R
 import dev.junjo.anchor.data.Goal
 import dev.junjo.anchor.data.GoalStore
-import dev.junjo.anchor.data.Reminder
-import dev.junjo.anchor.data.ReminderStore
 import dev.junjo.anchor.data.active
 import dev.junjo.anchor.data.doneToday
 import dev.junjo.anchor.data.today
@@ -119,12 +120,16 @@ private val DONE_MESSAGES = listOf("Done ✓", "Nice, that's done", "Ticked off 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun HomeScreen(bottomBar: @Composable () -> Unit = {}, fab: @Composable () -> Unit = {}) {
+fun HomeScreen(onOpenReminders: () -> Unit = {}) {
     val ctx = LocalContext.current
     val view = LocalView.current
     val goals by GoalStore.goals.collectAsStateWithLifecycle()
+    val allNotes by NoteStore.notes.collectAsStateWithLifecycle()
     val timer by FocusTimer.state.collectAsStateWithLifecycle()
     var settingsOpen by remember { mutableStateOf(false) }
+    var editingGoal by remember { mutableStateOf<Goal?>(null) }
+    var editingNote by remember { mutableStateOf<Note?>(null) }
+    var showDone by rememberSaveable { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -137,6 +142,7 @@ fun HomeScreen(bottomBar: @Composable () -> Unit = {}, fab: @Composable () -> Un
         FloatingGoals.sync(ctx)
     }
     val today = remember(resumes) { today() }
+    val date = remember(today) { LocalDate.now().format(DateTimeFormatter.ofPattern("EEE d MMM")) }
 
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         GoalsNotification.update(ctx)
@@ -168,35 +174,38 @@ fun HomeScreen(bottomBar: @Composable () -> Unit = {}, fab: @Composable () -> Un
         offerUndo("Deleted") { GoalStore.restore(goal.id) }
     }
 
-    fun startFor(goal: Goal, ready: Int, focus: Int) {
-        FocusTimer.startAfter(ready, focus, goal.text, goal.id)
-        val message = if (ready > 0) "Focus starts in ${durationText(ready)}" else "Focus started: ${durationText(focus)}"
-        scope.launch { snackbar.showSnackbar(message) }
-    }
-
     // Derived lists are rebuilt only when the data behind them changes, not on every redraw.
     val active = remember(goals) { goals.active() }
     val carried = remember(active, today) { active.filter { it.day < today } }
     val current = remember(active, today) { active.filter { it.day >= today } }
     val done = remember(goals, today) { goals.doneToday() }
+    val notes = remember(allNotes) { allNotes.visible() }
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val listState = rememberLazyListState()
+    // A list keeps its first visible row in place when one is added above it, which would put a
+    // timer started from the focus sheet just out of sight. Bring it into view instead.
+    LaunchedEffect(timer.isActive) {
+        if (timer.isActive) listState.animateScrollToItem(0)
+    }
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             LargeFlexibleTopAppBar(
-                title = { Text("Anchor") },
+                title = { Text("Today") },
                 subtitle = {
                     Text(
                         when {
-                            active.isEmpty() && done.isEmpty() -> "Nothing on the list"
-                            active.isEmpty() -> "All clear · ${done.size} done today"
-                            done.isEmpty() -> "${active.size} to do"
-                            else -> "${active.size} to do · ${done.size} done"
+                            active.isEmpty() && done.isEmpty() -> date
+                            active.isEmpty() -> "$date · all clear"
+                            else -> "$date · ${active.size} to do"
                         },
                     )
                 },
                 actions = {
+                    IconButton(onClick = onOpenReminders, shapes = IconButtonDefaults.shapes()) {
+                        Icon(painterResource(R.drawable.ic_bell), contentDescription = "Reminders")
+                    }
                     IconButton(onClick = { settingsOpen = true }, shapes = IconButtonDefaults.shapes()) {
                         Icon(painterResource(R.drawable.ic_settings), contentDescription = "Settings")
                     }
@@ -204,12 +213,12 @@ fun HomeScreen(bottomBar: @Composable () -> Unit = {}, fab: @Composable () -> Un
                 scrollBehavior = scrollBehavior,
             )
         },
-        bottomBar = bottomBar,
-        floatingActionButton = fab,
+        floatingActionButton = { AddMenu() },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize().imePadding(),
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
                 start = 16.dp,
                 end = 16.dp,
@@ -219,7 +228,6 @@ fun HomeScreen(bottomBar: @Composable () -> Unit = {}, fab: @Composable () -> Un
             // Rows in a group sit 2dp apart; sections add their own space around them.
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            // A running timer goes on top; otherwise goals come first and the presets wait below.
             if (timer.isActive) {
                 item(key = "timer") { TimerCard(timer, Modifier.animateItem().padding(bottom = 16.dp)) }
             }
@@ -246,11 +254,7 @@ fun HomeScreen(bottomBar: @Composable () -> Unit = {}, fab: @Composable () -> Un
                 }
             }
 
-            item(key = "add") {
-                AddGoalField(onAdd = { GoalStore.add(it) }, modifier = Modifier.padding(bottom = 12.dp))
-            }
-
-            if (current.isEmpty() && carried.isEmpty()) {
+            if (current.isEmpty() && carried.isEmpty() && notes.isEmpty()) {
                 item(key = "empty") { EmptyState(Modifier.animateItem()) }
             }
 
@@ -260,9 +264,11 @@ fun HomeScreen(bottomBar: @Composable () -> Unit = {}, fab: @Composable () -> Un
                     shape = segmentShape(i, current.size),
                     modifier = Modifier.animateItem(),
                     onDone = { complete(goal) },
-                    onStart = { ready, focus -> startFor(goal, ready, focus) },
-                    onRemind = { QuickAddActivity.open(ctx, QuickAddActivity.Kind.REMIND, goal.text) },
-                    onDelete = { remove(goal) },
+                    onFocus = { QuickAddActivity.open(ctx, QuickAddActivity.Kind.FOCUS, goal.text, goal.id) },
+                    onEdit = {
+                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                        editingGoal = goal
+                    },
                 )
             }
 
@@ -277,28 +283,85 @@ fun HomeScreen(bottomBar: @Composable () -> Unit = {}, fab: @Composable () -> Un
                 }
             }
 
-            if (done.isNotEmpty()) {
-                item(key = "done-header") {
-                    Text(
-                        "Done today · ${done.size}",
-                        style = MaterialTheme.typography.titleMediumEmphasized,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.animateItem().padding(top = 24.dp, bottom = 8.dp, start = 8.dp),
-                    )
-                }
-                // Same keys as the to-do rows, so a ticked goal visibly slides down into this list.
-                itemsIndexed(done, key = { _, g -> g.id }) { i, goal ->
-                    DoneRow(
-                        goal,
-                        shape = segmentShape(i, done.size),
-                        modifier = Modifier.animateItem(),
-                        onUndo = { GoalStore.setDone(goal.id, false) },
-                    )
+            if (notes.isNotEmpty()) {
+                item(key = "notes-header") { SectionHeader("Notes", Modifier.animateItem()) }
+                itemsIndexed(notes, key = { _, n -> n.id }) { i, note ->
+                    NoteRow(note, segmentShape(i, notes.size), Modifier.animateItem()) { editingNote = note }
                 }
             }
 
-            // Room for the + button, so it never covers the last goal.
+            if (done.isNotEmpty()) {
+                item(key = "done-header") {
+                    SectionHeader(
+                        "Done today · ${done.size}",
+                        Modifier.animateItem(),
+                        expanded = showDone,
+                        onClick = { showDone = !showDone },
+                    )
+                }
+                if (showDone) {
+                    itemsIndexed(done, key = { _, g -> g.id }) { i, goal ->
+                        DoneRow(
+                            goal,
+                            shape = segmentShape(i, done.size),
+                            modifier = Modifier.animateItem(),
+                            onUndo = { GoalStore.setDone(goal.id, false) },
+                        )
+                    }
+                }
+            }
+
+            // Room for the + button, so it never covers the last row.
             item(key = "fab-space") { Spacer(Modifier.height(72.dp)) }
+        }
+    }
+
+    editingGoal?.let { goal ->
+        key(goal.id) {
+            EditSheet(
+                initial = goal.text,
+                multiLine = false,
+                otherLabel = "Remind me…",
+                onOther = { text ->
+                    GoalStore.rename(goal.id, text)
+                    editingGoal = null
+                    QuickAddActivity.open(ctx, QuickAddActivity.Kind.REMIND, text.trim())
+                },
+                onDelete = { editingGoal = null; remove(goal) },
+                onClose = { text ->
+                    if (text.trim() != goal.text) GoalStore.rename(goal.id, text)
+                    editingGoal = null
+                },
+            )
+        }
+    }
+
+    editingNote?.let { note ->
+        key(note.id) {
+            EditSheet(
+                initial = note.text,
+                multiLine = true,
+                otherLabel = "Make it a goal",
+                onOther = { text ->
+                    // A goal is one short line: the note's first line becomes the goal.
+                    val goal = GoalStore.add(text.lineSequence().first { it.isNotBlank() })
+                    NoteStore.delete(note.id)
+                    editingNote = null
+                    offerUndo("Moved to your goals") {
+                        NoteStore.restore(note.id)
+                        goal?.let { GoalStore.delete(it.id) }
+                    }
+                },
+                onDelete = {
+                    NoteStore.delete(note.id)
+                    editingNote = null
+                    offerUndo("Note deleted") { NoteStore.restore(note.id) }
+                },
+                onClose = { text ->
+                    if (text.trim() != note.text) NoteStore.edit(note.id, text)
+                    editingNote = null
+                },
+            )
         }
     }
 
@@ -311,49 +374,90 @@ fun HomeScreen(bottomBar: @Composable () -> Unit = {}, fab: @Composable () -> Un
     }
 }
 
+/**
+ * The + button. One tap opens the four ways to catch something, each its own small sheet, so you
+ * pick what it is once and never switch modes while typing.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun AddGoalField(onAdd: (String) -> Unit, modifier: Modifier = Modifier) {
-    var text by rememberSaveable { mutableStateOf("") }
-    fun submit() {
-        if (text.isNotBlank()) {
-            onAdd(text)
-            text = ""
-        }
+private fun AddMenu() {
+    val ctx = LocalContext.current
+    var open by rememberSaveable { mutableStateOf(false) }
+    BackHandler(open) { open = false }
+    fun pick(kind: QuickAddActivity.Kind) {
+        open = false
+        QuickAddActivity.open(ctx, kind)
     }
-    TextField(
-        value = text,
-        onValueChange = { text = it },
-        modifier = modifier.fillMaxWidth(),
-        placeholder = { Text("Add a goal…") },
-        singleLine = true,
-        shape = RoundedCornerShape(28.dp),
-        colors = TextFieldDefaults.colors(
-            focusedIndicatorColor = Color.Transparent,
-            unfocusedIndicatorColor = Color.Transparent,
-            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ),
-        // Enter adds the goal and keeps the keyboard open, so a brain dump is just type, enter, type.
-        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
-        keyboardActions = KeyboardActions(onDone = { submit() }),
-        trailingIcon = {
-            if (text.isNotBlank()) {
-                IconButton(onClick = { submit() }) { Icon(painterResource(R.drawable.ic_add), "Add") }
+    FloatingActionButtonMenu(
+        expanded = open,
+        button = {
+            ToggleFloatingActionButton(checked = open, onCheckedChange = { open = it }) {
+                // The + turns into an × as the menu opens.
+                Icon(
+                    painterResource(R.drawable.ic_add),
+                    contentDescription = if (open) "Close" else "Add",
+                    modifier = Modifier.graphicsLayer { rotationZ = checkedProgress * 45f },
+                )
             }
         },
-    )
+    ) {
+        FloatingActionButtonMenuItem(
+            onClick = { pick(QuickAddActivity.Kind.GOAL) },
+            icon = { Icon(painterResource(R.drawable.ic_check_circle), contentDescription = null) },
+            text = { Text("Goal") },
+        )
+        FloatingActionButtonMenuItem(
+            onClick = { pick(QuickAddActivity.Kind.NOTE) },
+            icon = { Icon(painterResource(R.drawable.ic_note), contentDescription = null) },
+            text = { Text("Note") },
+        )
+        FloatingActionButtonMenuItem(
+            onClick = { pick(QuickAddActivity.Kind.REMIND) },
+            icon = { Icon(painterResource(R.drawable.ic_bell), contentDescription = null) },
+            text = { Text("Remind me") },
+        )
+        FloatingActionButtonMenuItem(
+            onClick = { pick(QuickAddActivity.Kind.FOCUS) },
+            icon = { Icon(painterResource(R.drawable.ic_timer), contentDescription = null) },
+            text = { Text("Focus") },
+        )
+    }
+}
+
+/** A quiet heading over a group of rows; with [onClick] it folds the group away. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun SectionHeader(text: String, modifier: Modifier = Modifier, expanded: Boolean = true, onClick: (() -> Unit)? = null) {
+    Row(
+        modifier
+            .padding(top = 20.dp, bottom = 6.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text, style = MaterialTheme.typography.titleSmallEmphasized, color = MaterialTheme.colorScheme.primary)
+        if (onClick != null) {
+            Icon(
+                painterResource(R.drawable.ic_expand_more),
+                contentDescription = if (expanded) "Hide" else "Show",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp).rotate(if (expanded) 180f else 0f),
+            )
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun EmptyState(modifier: Modifier = Modifier) {
     Column(
-        modifier.fillMaxWidth().padding(vertical = 24.dp),
+        modifier.fillMaxWidth().padding(vertical = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
             Modifier
-                .size(112.dp)
+                .size(96.dp)
                 .clip(MaterialShapes.Cookie9Sided.toShape())
                 .background(MaterialTheme.colorScheme.primaryContainer),
             contentAlignment = Alignment.Center,
@@ -362,20 +466,21 @@ private fun EmptyState(modifier: Modifier = Modifier) {
                 painterResource(R.drawable.ic_check),
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.size(48.dp),
+                modifier = Modifier.size(40.dp),
             )
         }
         Spacer(Modifier.height(16.dp))
-        Text("Nothing on the list", style = MaterialTheme.typography.titleLargeEmphasized)
+        Text("Nothing on your mind", style = MaterialTheme.typography.titleLargeEmphasized)
         Text(
-            "Add the next thing you want to get done. Small and specific works best.",
+            "Tap + for a goal or a note.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+            modifier = Modifier.padding(top = 4.dp),
         )
     }
 }
 
+/** Tap to tick it off, ▶ to focus on it, long-press to change it. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun GoalRow(
@@ -383,14 +488,14 @@ private fun GoalRow(
     shape: androidx.compose.ui.graphics.Shape,
     modifier: Modifier,
     onDone: () -> Unit,
-    onStart: (ready: Int, focus: Int) -> Unit,
-    onRemind: () -> Unit,
-    onDelete: () -> Unit,
+    onFocus: () -> Unit,
+    onEdit: () -> Unit,
 ) {
-    var menu by remember { mutableStateOf(false) }
     Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainer, modifier = modifier.fillMaxWidth()) {
         Row(
-            Modifier.clickable(onClick = onDone).padding(start = 16.dp, end = 4.dp),
+            Modifier
+                .combinedClickable(onClick = onDone, onLongClick = onEdit, onLongClickLabel = "Change")
+                .padding(start = 16.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
@@ -405,26 +510,24 @@ private fun GoalRow(
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.weight(1f).padding(vertical = 18.dp),
             )
-            Box {
-                IconButton(onClick = { menu = true }, shapes = IconButtonDefaults.shapes()) {
-                    Icon(painterResource(R.drawable.ic_play), "Start a timer for this goal", tint = MaterialTheme.colorScheme.primary)
-                }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    val ctx = LocalContext.current
-                    val focus = remember { AppPrefs.focusMinutes(ctx) }
-                    val ready = remember { AppPrefs.readyMinutes(ctx) }
-                    DropdownMenuItem(text = { Text("Just start · 5 min") }, onClick = { menu = false; onStart(0, 5) })
-                    DropdownMenuItem(text = { Text("Focus · ${durationText(focus)}") }, onClick = { menu = false; onStart(0, focus) })
-                    DropdownMenuItem(
-                        text = { Text("Get ready ${durationText(ready)}, then focus") },
-                        onClick = { menu = false; onStart(ready, focus) },
-                    )
-                    DropdownMenuItem(text = { Text("Remind me about this in…") }, onClick = { menu = false; onRemind() })
-                    HorizontalDivider()
-                    DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; onDelete() })
-                }
+            IconButton(onClick = onFocus, shapes = IconButtonDefaults.shapes()) {
+                Icon(painterResource(R.drawable.ic_play), "Focus on this", tint = MaterialTheme.colorScheme.primary)
             }
         }
+    }
+}
+
+/** Notes sit under the goals, quieter: no circle, since there's nothing to tick off. */
+@Composable
+private fun NoteRow(note: Note, shape: androidx.compose.ui.graphics.Shape, modifier: Modifier, onOpen: () -> Unit) {
+    Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = modifier.fillMaxWidth()) {
+        Text(
+            note.text,
+            style = MaterialTheme.typography.bodyLarge,
+            maxLines = 4,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.clickable(onClick = onOpen).padding(horizontal = 20.dp, vertical = 14.dp).fillMaxWidth(),
+        )
     }
 }
 
@@ -609,7 +712,7 @@ private fun SettingsSection(refresh: Int, onShowSetup: () -> Unit) {
                 Text("Add an “Add goal” button to Quick Settings")
             }
             TextButton(onClick = { requestTile(ctx, NoteTileService::class.java, R.string.note_tile_label, R.drawable.ic_note) }, shapes = ButtonDefaults.shapes()) {
-                Text("Add a “Write it down” button to Quick Settings")
+                Text("Add an “Add note” button to Quick Settings")
             }
         }
         if (AppPrefs.setupHidden(ctx)) {

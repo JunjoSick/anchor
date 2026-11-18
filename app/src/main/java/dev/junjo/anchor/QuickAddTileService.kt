@@ -28,7 +28,7 @@ open class QuickAddTileService : TileService() {
     }
 }
 
-/** A "Write it down" button in Quick Settings, for notes. */
+/** An "Add note" button in Quick Settings. */
 class NoteTileService : QuickAddTileService() {
     override val action: String = QuickAddActivity.ACTION_NEW_NOTE
 }

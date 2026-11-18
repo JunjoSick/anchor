@@ -4,8 +4,8 @@
     <string name="widget_description">Your short-term goals, always in sight. Tap one to tick it off.</string>
     <string name="tile_label">Add goal</string>
     <string name="shortcut_add">Add goal</string>
-    <string name="shortcut_note">Write it down</string>
-    <string name="shortcut_remind">Remind me in…</string>
+    <string name="shortcut_note">Add note</string>
+    <string name="shortcut_remind">Remind me</string>
     <string name="shortcut_focus">Focus</string>
-    <string name="note_tile_label">Write it down</string>
+    <string name="note_tile_label">Add note</string>
 </resources>

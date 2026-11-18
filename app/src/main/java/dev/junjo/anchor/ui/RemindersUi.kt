@@ -80,9 +80,8 @@ fun LazyListScope.remindersSection(
     if (reminders.isEmpty()) {
         item(key = "reminders-empty") {
             Text(
-                "Repeating reminders are for things that come back, like meds, water or winding down for bed: " +
-                    "on set days, or every few days or hours. \"Remind me in…\" is for a one-off, like a call in 40 minutes. " +
-                    "When one goes off it lands on your goal list until you tick it off. Can't miss it? Make it ring like an alarm.",
+                "Once: a call in 40 minutes. Repeating: meds, water, bedtime. " +
+                    "When one goes off it lands on your goal list until you tick it off.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.animateItem().padding(horizontal = 8.dp),
