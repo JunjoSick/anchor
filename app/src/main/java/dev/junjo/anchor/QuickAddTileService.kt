@@ -1,5 +1,6 @@
 package dev.junjo.anchor
 
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.Build
@@ -22,7 +23,9 @@ open class QuickAddTileService : TileService() {
         if (Build.VERSION.SDK_INT >= 34) {
             startActivityAndCollapse(PendingIntent.getActivity(this, action.hashCode(), intent, PendingIntent.FLAG_IMMUTABLE))
         } else {
+            // The only way on Android 13 and older; the newer call above doesn't exist there.
             @Suppress("DEPRECATION")
+            @SuppressLint("StartActivityAndCollapseDeprecated")
             startActivityAndCollapse(intent)
         }
     }

@@ -1,5 +1,8 @@
 package dev.junjo.anchor
 
+import androidx.compose.runtime.key
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.compose.material3.FilledTonalIconToggleButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.foundation.layout.heightIn
@@ -87,36 +90,52 @@ import kotlinx.coroutines.delay
 class QuickAddActivity : ComponentActivity() {
     enum class Kind { GOAL, NOTE, REMIND, FOCUS }
 
+    /** What the sheet shows; [serial] counts requests, so each one starts with fresh state. */
+    private class Request(val kind: Kind, val text: String?, val goalId: String?, val serial: Int)
+
+    private var request by mutableStateOf<Request?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        show(intent, serial = 0)
+        setContent {
+            AnchorTheme {
+                val r = request ?: return@AnchorTheme
+                // A new request gets its own state. Restarting the activity instead would restore
+                // the old sheet's saved state into the new one (a one-line goal field's scroll
+                // state into a multi-line note field crashes).
+                key(r.serial) {
+                    Sheet(onClose = { finish() }) {
+                        if (r.kind == Kind.FOCUS) FocusContent(label = r.text, goalId = r.goalId, onClose = { finish() })
+                        else AddContent(r.kind, r.text.orEmpty(), onClose = { finish() })
+                    }
+                }
+            }
+        }
+    }
+
+    /** Already open (single task) and asked for another kind: swap the sheet in place. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        show(intent, serial = (request?.serial ?: 0) + 1)
+    }
+
+    private fun show(intent: Intent?, serial: Int) {
         val kind = when (intent?.action) {
             ACTION_NEW_NOTE -> Kind.NOTE
             ACTION_REMIND -> Kind.REMIND
             ACTION_FOCUS -> Kind.FOCUS
             else -> Kind.GOAL
         }
-        // Focus has nothing to type, so the keyboard stays down.
-        if (kind == Kind.FOCUS) {
-            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        }
-        val text = intent?.getStringExtra(EXTRA_TEXT)
-        val goalId = intent?.getStringExtra(EXTRA_GOAL)
-        setContent {
-            AnchorTheme {
-                Sheet(onClose = { finish() }) {
-                    if (kind == Kind.FOCUS) FocusContent(label = text, goalId = goalId, onClose = { finish() })
-                    else AddContent(kind, text.orEmpty(), onClose = { finish() })
-                }
-            }
-        }
-    }
-
-    /** Already open (single task) and asked for another kind: start over with the new one. */
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        recreate()
+        // Focus has nothing to type, so the keyboard stays down; the others open with it up.
+        window.setSoftInputMode(
+            (if (kind == Kind.FOCUS) WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN else WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE) or
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE,
+        )
+        if (kind == Kind.FOCUS) WindowCompat.getInsetsController(window, window.decorView).hide(WindowInsetsCompat.Type.ime())
+        request = Request(kind, intent?.getStringExtra(EXTRA_TEXT), intent?.getStringExtra(EXTRA_GOAL), serial)
     }
 
     companion object {

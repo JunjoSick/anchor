@@ -12,8 +12,8 @@ android {
         // Android 12: dynamic colours, exact-alarm permission model and modern widgets are all there.
         minSdk = 31
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.4.1"
+        versionCode = 6
+        versionName = "0.4.2"
     }
 
     buildTypes {
@@ -37,6 +37,12 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    // A signed list of libraries that only Google Play reads. The app is sideloaded, so leave it out.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
 }
 
