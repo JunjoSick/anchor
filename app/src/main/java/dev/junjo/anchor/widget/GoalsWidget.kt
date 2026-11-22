@@ -16,6 +16,8 @@ import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionParametersOf
 import android.content.Intent
 import androidx.glance.LocalContext
+import androidx.glance.LocalSize
+import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
@@ -58,6 +60,8 @@ import dev.junjo.anchor.timer.FocusTimer
  * to open anything. Tap a goal to tick it off (tap again to undo), + to add one.
  */
 class GoalsWidget : GlanceAppWidget() {
+    override val sizeMode: SizeMode = SizeMode.Exact
+
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
             val goals by GoalStore.goals.collectAsState()
@@ -86,6 +90,10 @@ private const val DONE_SHOWN = 3
 private fun WidgetContent(goals: List<Goal>, timer: FocusTimer.State) {
     val active = goals.active()
     val done = goals.doneToday().take(DONE_SHOWN)
+    // Narrow widgets (like 2×2) move the timer chip onto its own line so the title and + never clip.
+    val compact = LocalSize.current.width < 250.dp
+    val btnSize = if (compact) 34.dp else 36.dp
+    val btnRadius = if (compact) 17.dp else 18.dp
 
     Column(
         GlanceModifier
@@ -98,16 +106,17 @@ private fun WidgetContent(goals: List<Goal>, timer: FocusTimer.State) {
         Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 if (active.isEmpty()) "Goals" else "Goals · ${active.size}",
+                maxLines = 1,
                 style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold),
                 modifier = GlanceModifier.defaultWeight().clickable(actionStartActivity<MainActivity>()),
             )
-            TimerChip(timer)
-            Spacer(GlanceModifier.width(8.dp))
+            if (!compact) TimerChip(timer)
+            Spacer(GlanceModifier.width(if (compact) 4.dp else 8.dp))
             val ctx = LocalContext.current
             Box(
                 GlanceModifier
-                    .size(36.dp)
-                    .cornerRadius(18.dp)
+                    .size(btnSize)
+                    .cornerRadius(btnRadius)
                     .background(GlanceTheme.colors.secondaryContainer)
                     .clickable(
                         actionStartActivity(
@@ -120,14 +129,14 @@ private fun WidgetContent(goals: List<Goal>, timer: FocusTimer.State) {
                     ImageProvider(R.drawable.ic_note),
                     contentDescription = "Write something down",
                     colorFilter = ColorFilter.tint(GlanceTheme.colors.onSecondaryContainer),
-                    modifier = GlanceModifier.size(20.dp),
+                    modifier = GlanceModifier.size(19.dp),
                 )
             }
             Spacer(GlanceModifier.width(6.dp))
             Box(
                 GlanceModifier
-                    .size(36.dp)
-                    .cornerRadius(18.dp)
+                    .size(btnSize)
+                    .cornerRadius(btnRadius)
                     .background(GlanceTheme.colors.primary)
                     .clickable(
                         actionStartActivity(
@@ -140,9 +149,13 @@ private fun WidgetContent(goals: List<Goal>, timer: FocusTimer.State) {
                     ImageProvider(R.drawable.ic_add),
                     contentDescription = "Add goal",
                     colorFilter = ColorFilter.tint(GlanceTheme.colors.onPrimary),
-                    modifier = GlanceModifier.size(22.dp),
+                    modifier = GlanceModifier.size(21.dp),
                 )
             }
+        }
+        if (compact && timer.isActive) {
+            Spacer(GlanceModifier.height(6.dp))
+            TimerChip(timer, compact = true)
         }
         Spacer(GlanceModifier.height(6.dp))
 
@@ -153,7 +166,7 @@ private fun WidgetContent(goals: List<Goal>, timer: FocusTimer.State) {
                 modifier = GlanceModifier.padding(vertical = 8.dp),
             )
         } else {
-            LazyColumn(GlanceModifier.fillMaxSize()) {
+            LazyColumn(GlanceModifier.fillMaxWidth().defaultWeight()) {
                 items(active, itemId = { it.id.hashCode().toLong() }) { GoalLine(it, done = false) }
                 items(done, itemId = { "done-${it.id}".hashCode().toLong() }) { GoalLine(it, done = true) }
             }
@@ -162,7 +175,7 @@ private fun WidgetContent(goals: List<Goal>, timer: FocusTimer.State) {
 }
 
 @Composable
-private fun TimerChip(timer: FocusTimer.State) {
+private fun TimerChip(timer: FocusTimer.State, compact: Boolean = false) {
     val text = when (timer.status) {
         FocusTimer.Status.RUNNING ->
             if (timer.isGettingReady) "▶ focus at ${clockTime(timer.endAt)}" else "⏱ until ${clockTime(timer.endAt)}"
@@ -170,11 +183,34 @@ private fun TimerChip(timer: FocusTimer.State) {
         FocusTimer.Status.RINGING -> if (timer.isReadyRinging) "▶ time to start" else "⏰ time's up"
         FocusTimer.Status.IDLE -> return
     }
-    Text(
-        text,
-        style = TextStyle(color = GlanceTheme.colors.primary, fontSize = 13.sp, fontWeight = FontWeight.Medium),
-        modifier = GlanceModifier.padding(horizontal = 4.dp).clickable(actionStartActivity<MainActivity>()),
-    )
+    if (compact) {
+        val warm = timer.status == FocusTimer.Status.RINGING || timer.phase == FocusTimer.Phase.READY
+        Box(
+            GlanceModifier
+                .fillMaxWidth()
+                .cornerRadius(12.dp)
+                .background(if (warm) GlanceTheme.colors.tertiaryContainer else GlanceTheme.colors.primaryContainer)
+                .clickable(actionStartActivity<MainActivity>())
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+        ) {
+            Text(
+                text,
+                maxLines = 1,
+                style = TextStyle(
+                    color = if (warm) GlanceTheme.colors.onTertiaryContainer else GlanceTheme.colors.onPrimaryContainer,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                ),
+            )
+        }
+    } else {
+        Text(
+            text,
+            maxLines = 1,
+            style = TextStyle(color = GlanceTheme.colors.primary, fontSize = 13.sp, fontWeight = FontWeight.Medium),
+            modifier = GlanceModifier.padding(horizontal = 4.dp).clickable(actionStartActivity<MainActivity>()),
+        )
+    }
 }
 
 @Composable

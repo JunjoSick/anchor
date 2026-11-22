@@ -106,6 +106,13 @@ data class Reminder(
             )
         }
 
+        /** The next time [hour]:[minute] comes round — later today if still ahead, otherwise tomorrow. */
+        fun nextOccurrence(hour: Int, minute: Int, now: ZonedDateTime = ZonedDateTime.now()): Long {
+            val today = now.toLocalDate().atTime(hour, minute).atZone(now.zone)
+            val target = if (today.isAfter(now)) today else now.toLocalDate().plusDays(1).atTime(hour, minute).atZone(now.zone)
+            return target.toInstant().toEpochMilli()
+        }
+
         /**
          * Where a repeat every few days or hours starts, from the time of day picked for it.
          * Whole days: the next time that clock time comes round, so "every 2 days at 9:00" set at

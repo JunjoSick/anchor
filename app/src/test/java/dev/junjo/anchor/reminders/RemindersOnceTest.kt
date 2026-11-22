@@ -61,4 +61,17 @@ class RemindersOnceTest {
         assertEquals("1 h 20 min", durationText(80))
         assertEquals("23 h 59 min", durationText(23 * 60 + 59))
     }
+
+    @Test fun nextOccurrencePicksTodayIfAheadOtherwiseTomorrow() {
+        val evening = at(ROME, "2026-11-22T22:30")
+        // Later tonight -> today.
+        assertEquals(ms("2026-11-22T23:15"), Reminder.nextOccurrence(23, 15, evening))
+        // Tomorrow morning -> next day.
+        assertEquals(ms("2026-11-23T08:00"), Reminder.nextOccurrence(8, 0, evening))
+        // Exact current minute -> tomorrow, never in the past.
+        assertEquals(ms("2026-11-23T22:30"), Reminder.nextOccurrence(22, 30, evening))
+        // Across a year boundary.
+        val nye = at(ROME, "2026-12-31T23:50")
+        assertEquals(ms("2027-01-01T07:30"), Reminder.nextOccurrence(7, 30, nye))
+    }
 }

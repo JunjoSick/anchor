@@ -78,8 +78,15 @@ import dev.junjo.anchor.data.ReminderStore
 import dev.junjo.anchor.timer.FocusTimer
 import dev.junjo.anchor.ui.AnchorTheme
 import dev.junjo.anchor.ui.DurationDialog
+import dev.junjo.anchor.ui.RemindWhenDialog
 import dev.junjo.anchor.ui.rememberNow
 import kotlinx.coroutines.delay
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 
 /**
  * Every way to add something is the same small sheet over whatever you were doing, opened from
@@ -221,7 +228,11 @@ private fun AddContent(kind: QuickAddActivity.Kind, initialText: String, onClose
     var text by rememberSaveable { mutableStateOf(initialText) }
     var added by rememberSaveable { mutableIntStateOf(0) }
     var inMinutes by rememberSaveable { mutableIntStateOf(30) }
-    var alarm by rememberSaveable { mutableStateOf(false) }
+    /** >= 0 when a specific clock time was picked ("At 8:00"), -1 for relative ("In 30 min"). */
+    var atHour by rememberSaveable { mutableIntStateOf(-1) }
+    var atMinute by rememberSaveable { mutableIntStateOf(0) }
+    // Ring by default so one-off reminders aren't easily missed; tap the muted bell to silence.
+    var alarm by rememberSaveable { mutableStateOf(true) }
     var picking by rememberSaveable { mutableStateOf(false) }
     val now = rememberNow(active = remind, periodMs = 15_000L)
     val focus = remember { FocusRequester() }
@@ -233,7 +244,9 @@ private fun AddContent(kind: QuickAddActivity.Kind, initialText: String, onClose
         keyboard?.show()
     }
 
-    fun at(base: Long = System.currentTimeMillis()) = base + inMinutes * 60_000L
+    fun at(base: Long = System.currentTimeMillis()): Long =
+        if (atHour >= 0) Reminder.nextOccurrence(atHour, atMinute, Instant.ofEpochMilli(base).atZone(ZoneId.systemDefault()))
+        else base + inMinutes * 60_000L
 
     fun save(): Boolean {
         if (text.isBlank()) return false
@@ -248,7 +261,15 @@ private fun AddContent(kind: QuickAddActivity.Kind, initialText: String, onClose
     }
 
     if (picking) {
-        DurationDialog("Remind me in", inMinutes, onDismiss = { picking = false }, onPick = { inMinutes = it; picking = false })
+        RemindWhenDialog(
+            initialMinutes = inMinutes,
+            initialHour = atHour.takeIf { it >= 0 },
+            initialMinute = atMinute,
+            defaultToClock = atHour >= 0 || inMinutes in REMIND_IN,
+            onDismiss = { picking = false },
+            onPickClock = { h, m -> atHour = h; atMinute = m; picking = false },
+            onPickDuration = { m -> atHour = -1; inMinutes = m; picking = false },
+        )
     }
 
     SheetTitle(
@@ -291,22 +312,34 @@ private fun AddContent(kind: QuickAddActivity.Kind, initialText: String, onClose
 
     if (remind) {
         Spacer(Modifier.height(12.dp))
-        DurationRow(REMIND_IN, inMinutes, onSelect = { inMinutes = it }, onOther = { picking = true }, prefix = "In ")
+        val pickedClockLabel = if (atHour >= 0) {
+            LocalTime.of(atHour, atMinute).format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT))
+        } else null
+        DurationRow(
+            REMIND_IN,
+            inMinutes,
+            onSelect = { atHour = -1; inMinutes = it },
+            onOther = { picking = true },
+            prefix = "In ",
+            customLabel = pickedClockLabel,
+            otherIcon = R.drawable.ic_schedule,
+            otherDescription = "Pick a time",
+        )
     }
 
     Spacer(Modifier.height(12.dp))
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         if (remind) {
-            // Quiet by default; the bell makes it ring like an alarm, and the button says so.
+            // Rings by default; toggling this silences it to a normal notification.
             FilledTonalIconToggleButton(
-                checked = alarm,
-                onCheckedChange = { alarm = it },
+                checked = !alarm,
+                onCheckedChange = { muted -> alarm = !muted },
                 shapes = IconButtonDefaults.toggleableShapes(),
                 modifier = Modifier.size(48.dp),
             ) {
                 Icon(
-                    painterResource(if (alarm) R.drawable.ic_bell_ring else R.drawable.ic_bell),
-                    contentDescription = "Ring like an alarm",
+                    painterResource(R.drawable.ic_bell_off),
+                    contentDescription = if (alarm) "Silence reminder" else "Ring like an alarm",
                 )
             }
             Spacer(Modifier.weight(1f))
@@ -317,11 +350,15 @@ private fun AddContent(kind: QuickAddActivity.Kind, initialText: String, onClose
             }
         }
         Button(onClick = { if (save()) onClose() }, enabled = text.isNotBlank(), shapes = ButtonDefaults.shapes(), modifier = Modifier.heightIn(min = 48.dp)) {
+            val target = if (remind) at(now) else 0L
+            val isTomorrow = remind && Instant.ofEpochMilli(target).atZone(ZoneId.systemDefault()).toLocalDate()
+                .isAfter(LocalDate.now(ZoneId.systemDefault()))
+            val whenLabel = if (isTomorrow) "tomorrow ${clockTime(target)}" else "at ${clockTime(target)}"
             Text(
                 when {
                     !remind -> "Save"
-                    alarm -> "Ring at ${clockTime(at(now))}"
-                    else -> "Remind me at ${clockTime(at(now))}"
+                    alarm -> "Ring $whenLabel"
+                    else -> "Remind $whenLabel"
                 },
             )
         }
