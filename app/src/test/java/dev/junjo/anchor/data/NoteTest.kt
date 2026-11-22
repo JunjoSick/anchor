@@ -20,4 +20,14 @@ class NoteTest {
         val deleted = n.copy(deleted = true)
         assertEquals(deleted, Note.fromJson(JSONObject(deleted.toJson().toString())))
     }
+
+    @Test fun pruneDropsOldDeletedNotesOnly() {
+        val now = 100L * 24 * 60 * 60 * 1000
+        val notes = listOf(
+            Note("live-old", "Keep", createdAt = 1, updatedAt = 1, deleted = false),
+            Note("del-recent", "Keep for sync", createdAt = 1, updatedAt = now - NoteStore.HISTORY_MS + 1, deleted = true),
+            Note("del-old", "Drop", createdAt = 1, updatedAt = now - NoteStore.HISTORY_MS - 1, deleted = true),
+        )
+        assertEquals(listOf("live-old", "del-recent"), NoteStore.prune(notes, now).map { it.id })
+    }
 }

@@ -23,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -58,55 +59,83 @@ private fun AlarmScreen(state: FocusTimer.State) {
     val big = Modifier.fillMaxWidth().heightIn(min = ButtonDefaults.LargeContainerHeight)
     val bigPadding = ButtonDefaults.contentPaddingFor(ButtonDefaults.LargeContainerHeight)
     val bigText = MaterialTheme.typography.titleLarge
+    val ready = state.phase == FocusTimer.Phase.READY
 
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.primaryContainer) {
+    Surface(
+        Modifier.fillMaxSize(),
+        color = if (ready) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer,
+    ) {
         Column(
             Modifier.safeDrawingPadding().padding(32.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // The morphing shape keeps moving, which pulls the eye back if attention drifts.
-            LoadingIndicator(Modifier.size(160.dp), color = MaterialTheme.colorScheme.primary)
+            LoadingIndicator(
+                Modifier.size(160.dp),
+                color = if (ready) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+            )
             Spacer(Modifier.height(24.dp))
-            Text("Time's up", style = MaterialTheme.typography.displayLargeEmphasized)
+            Text(if (ready) "Time to start!" else "Time's up", style = MaterialTheme.typography.displayLargeEmphasized)
             Spacer(Modifier.height(8.dp))
             Text(
-                state.label ?: "Your ${minutesText(state.totalMs)} timer finished",
+                if (ready) listOfNotNull(state.label ?: "Focus", minutesText(state.focusMs)).joinToString(" · ")
+                else state.label ?: "Your ${minutesText(state.totalMs)} timer finished",
                 style = MaterialTheme.typography.headlineSmall,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(48.dp))
 
-            val goalId = state.goalId
-            if (goalId != null && GoalStore.find(goalId)?.isActive == true) {
+            if (ready) {
                 Button(
-                    onClick = { GoalStore.setDone(goalId, true); FocusTimer.stop() },
+                    onClick = { FocusTimer.startNow() },
                     shapes = ButtonDefaults.shapes(),
                     modifier = big,
                     contentPadding = bigPadding,
-                ) { Text("Goal done ✓", style = bigText) }
+                ) { Text("Start focus", style = bigText) }
                 Spacer(Modifier.height(12.dp))
-                FilledTonalButton(
-                    onClick = { FocusTimer.stop() },
+                OutlinedButton(
+                    onClick = { FocusTimer.addMinutes(5) },
                     shapes = ButtonDefaults.shapes(),
                     modifier = big,
                     contentPadding = bigPadding,
-                ) { Text("Stop for now", style = bigText) }
+                ) { Text("5 more minutes", style = bigText) }
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = { FocusTimer.stop() }, shapes = ButtonDefaults.shapes()) {
+                    Text("Cancel", style = MaterialTheme.typography.titleMedium)
+                }
             } else {
-                Button(
-                    onClick = { FocusTimer.stop() },
+                val goalId = state.goalId
+                if (goalId != null && GoalStore.find(goalId)?.isActive == true) {
+                    Button(
+                        onClick = { GoalStore.setDone(goalId, true); FocusTimer.stop() },
+                        shapes = ButtonDefaults.shapes(),
+                        modifier = big,
+                        contentPadding = bigPadding,
+                    ) { Text("Goal done ✓", style = bigText) }
+                    Spacer(Modifier.height(12.dp))
+                    FilledTonalButton(
+                        onClick = { FocusTimer.stop() },
+                        shapes = ButtonDefaults.shapes(),
+                        modifier = big,
+                        contentPadding = bigPadding,
+                    ) { Text("Stop for now", style = bigText) }
+                } else {
+                    Button(
+                        onClick = { FocusTimer.stop() },
+                        shapes = ButtonDefaults.shapes(),
+                        modifier = big,
+                        contentPadding = bigPadding,
+                    ) { Text("Done", style = bigText) }
+                }
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(
+                    onClick = { FocusTimer.addMinutes(5) },
                     shapes = ButtonDefaults.shapes(),
                     modifier = big,
                     contentPadding = bigPadding,
-                ) { Text("Done", style = bigText) }
+                ) { Text("5 more minutes", style = bigText) }
             }
-            Spacer(Modifier.height(12.dp))
-            OutlinedButton(
-                onClick = { FocusTimer.addMinutes(5) },
-                shapes = ButtonDefaults.shapes(),
-                modifier = big,
-                contentPadding = bigPadding,
-            ) { Text("5 more minutes", style = bigText) }
         }
     }
 }

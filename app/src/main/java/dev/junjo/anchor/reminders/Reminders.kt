@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.core.app.NotificationCompat
+import androidx.core.content.edit
 import dev.junjo.anchor.R
 import dev.junjo.anchor.data.GoalStore
 import dev.junjo.anchor.data.Reminder
@@ -51,7 +52,10 @@ object Reminders {
     private val _ringing = MutableStateFlow<Set<String>>(emptySet())
     val ringing: StateFlow<Set<String>> = _ringing.asStateFlow()
 
-    fun scheduleAll(ctx: Context) = ReminderStore.reminders.value.forEach { schedule(ctx, it) }
+    fun scheduleAll(ctx: Context) {
+        ReminderStore.reminders.value.forEach { schedule(ctx, it) }
+        restoreSnoozes(ctx)
+    }
 
     fun schedule(ctx: Context, r: Reminder) {
         val am = ctx.getSystemService(AlarmManager::class.java)
@@ -62,12 +66,7 @@ object Reminders {
             return
         }
         val at = next(r) ?: return
-        if (r.alarm && am.canScheduleExactAlarms()) {
-            // The kind of alarm a clock app uses: always on time, and shown as the next alarm.
-            am.setAlarmClock(AlarmManager.AlarmClockInfo(at, Notifications.openApp(ctx)), pi)
-        } else {
-            exact(am, at, pi)
-        }
+        scheduleAlarm(ctx, am, r.alarm, at, pi)
     }
 
     /** The next time this reminder is due, or null if it never is (no days picked). */
@@ -117,8 +116,11 @@ object Reminders {
             ACTION_SNOOZED -> fire(ctx, id, snoozed = true, goalId = goalId)
             ACTION_SNOOZE -> {
                 answered(ctx, id)
+                val r = ReminderStore.find(id)
+                if (r == null || r.deleted || !r.enabled) return
                 val at = System.currentTimeMillis() + SNOOZE_MINUTES * 60_000L
-                exact(ctx.getSystemService(AlarmManager::class.java), at, broadcast(ctx, ACTION_SNOOZED, id, goalId))
+                saveSnooze(ctx, id, at, goalId)
+                scheduleAlarm(ctx, ctx.getSystemService(AlarmManager::class.java), r.alarm, at, broadcast(ctx, ACTION_SNOOZED, id, goalId))
             }
             ACTION_DONE -> {
                 answered(ctx, id)
@@ -140,11 +142,15 @@ object Reminders {
 
     private fun answered(ctx: Context, id: String) {
         Notifications.cancel(ctx, notificationId(id))
-        ctx.getSystemService(AlarmManager::class.java).cancel(broadcast(ctx, ACTION_SILENCE, id, null))
+        val am = ctx.getSystemService(AlarmManager::class.java)
+        am.cancel(broadcast(ctx, ACTION_SILENCE, id, null))
+        am.cancel(broadcast(ctx, ACTION_SNOOZED, id, null))
+        clearSnooze(ctx, id)
         _ringing.update { it - id }
     }
 
     private fun fire(ctx: Context, id: String, snoozed: Boolean, goalId: String?) {
+        if (snoozed) clearSnooze(ctx, id)
         val r = ReminderStore.find(id) ?: return
         if (r.deleted || !r.enabled) return
         var goal = goalId
@@ -202,6 +208,48 @@ object Reminders {
         val n = builder.build()
         if (loud) n.flags = n.flags or Notification.FLAG_INSISTENT
         Notifications.post(ctx, notificationId(r.id), n)
+    }
+
+    private fun scheduleAlarm(ctx: Context, am: AlarmManager, alarm: Boolean, at: Long, pi: PendingIntent) {
+        if (alarm && am.canScheduleExactAlarms()) {
+            // The kind of alarm a clock app uses: always on time, and shown as the next alarm.
+            am.setAlarmClock(AlarmManager.AlarmClockInfo(at, Notifications.openApp(ctx)), pi)
+        } else {
+            exact(am, at, pi)
+        }
+    }
+
+    private fun snoozePrefs(ctx: Context) =
+        ctx.applicationContext.getSharedPreferences("reminder_snoozes", Context.MODE_PRIVATE)
+
+    private fun saveSnooze(ctx: Context, id: String, at: Long, goalId: String?) {
+        snoozePrefs(ctx).edit { putString(id, "$at|${goalId.orEmpty()}") }
+    }
+
+    private fun clearSnooze(ctx: Context, id: String) {
+        snoozePrefs(ctx).edit { remove(id) }
+    }
+
+    /** Re-schedules any pending snoozes after a reboot or app update, dropping expired ones. */
+    private fun restoreSnoozes(ctx: Context) {
+        val prefs = snoozePrefs(ctx)
+        val entries = prefs.all
+        if (entries.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val am = ctx.getSystemService(AlarmManager::class.java)
+        val drop = mutableListOf<String>()
+        entries.forEach { (id, raw) ->
+            val parts = (raw as? String)?.split("|", limit = 2)
+            val at = parts?.getOrNull(0)?.toLongOrNull()
+            val goalId = parts?.getOrNull(1)?.takeIf { it.isNotEmpty() }
+            val r = ReminderStore.find(id)
+            if (at == null || at <= now || r == null || r.deleted || !r.enabled) {
+                drop += id
+            } else {
+                scheduleAlarm(ctx, am, r.alarm, at, broadcast(ctx, ACTION_SNOOZED, id, goalId))
+            }
+        }
+        if (drop.isNotEmpty()) prefs.edit { drop.forEach { remove(it) } }
     }
 
     private fun exact(am: AlarmManager, at: Long, pi: PendingIntent) {

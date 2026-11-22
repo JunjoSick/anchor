@@ -7,6 +7,7 @@ import dev.junjo.anchor.notify.GoalsNotification
 import dev.junjo.anchor.overlay.FloatingGoals
 import dev.junjo.anchor.reminders.Reminders
 import dev.junjo.anchor.timer.FocusTimer
+import dev.junjo.anchor.timer.TimerNotifications
 import dev.junjo.anchor.widget.DayRollover
 import dev.junjo.anchor.widget.Widgets
 
@@ -27,6 +28,11 @@ class BootReceiver : BroadcastReceiver() {
             Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED -> {
                 Reminders.scheduleAll(context)
                 DayRollover.schedule(context)
+                Widgets.refresh(context)
+                val timer = FocusTimer.state.value
+                if (timer.status == FocusTimer.Status.RUNNING || timer.status == FocusTimer.Status.PAUSED) {
+                    TimerNotifications.showRunning(context, timer)
+                }
             }
             DayRollover.ACTION -> {
                 Widgets.refresh(context)

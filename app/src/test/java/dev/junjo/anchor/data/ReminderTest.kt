@@ -51,4 +51,16 @@ class ReminderTest {
         assertFalse(r.alarm)
         assertFalse(r.repeatsByInterval)
     }
+
+    @Test fun pruneDropsOldOneOffsAndOldDeletedReminders() {
+        val now = 100L * 24 * 60 * 60 * 1000
+        val list = listOf(
+            Reminder("active-old", "Meds", 8, 0, createdAt = 1, updatedAt = 1),
+            Reminder("del-recent", "Old", 8, 0, createdAt = 1, updatedAt = now - ReminderStore.HISTORY_MS + 1, deleted = true),
+            Reminder("del-old", "Gone", 8, 0, createdAt = 1, updatedAt = now - ReminderStore.HISTORY_MS - 1, deleted = true),
+            Reminder("once-recent", "Call", 8, 0, createdAt = 1, updatedAt = now, startAt = now - ReminderStore.ONCE_KEEP_MS + 1, once = true),
+            Reminder("once-old", "Past", 8, 0, createdAt = 1, updatedAt = now, startAt = now - ReminderStore.ONCE_KEEP_MS - 1, once = true),
+        )
+        assertEquals(listOf("active-old", "del-recent", "once-recent"), ReminderStore.prune(list, now).map { it.id })
+    }
 }

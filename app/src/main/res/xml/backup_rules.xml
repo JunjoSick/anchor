@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Back up goals, notes, reminders and settings, but never transient timer or snooze state. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="timer.xml" />
+    <exclude domain="sharedpref" path="reminder_snoozes.xml" />
+</full-backup-content>

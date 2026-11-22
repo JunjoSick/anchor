@@ -3,6 +3,9 @@ package dev.junjo.anchor
 import android.content.Context
 import androidx.core.content.edit
 import dev.junjo.anchor.notify.GoalsNotification
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /** The few settings the app has. Kept deliberately small: tweaking settings is not doing tasks. */
 object AppPrefs {
@@ -11,6 +14,14 @@ object AppPrefs {
     private const val SETUP_HIDDEN = "setup_hidden"
     private const val FOCUS_MINUTES = "focus_minutes"
     private const val READY_MINUTES = "ready_minutes"
+    private const val BUBBLE_NUDGE = "bubble_nudge"
+
+    private val _bubbleNudge = MutableStateFlow(false)
+    val bubbleNudgeFlow: StateFlow<Boolean> = _bubbleNudge.asStateFlow()
+
+    fun init(ctx: Context) {
+        _bubbleNudge.value = prefs(ctx).getBoolean(BUBBLE_NUDGE, false)
+    }
 
     /** Quick picks in the focus sheet, in minutes; "Other…" covers the rest. */
     val FOCUS_PRESETS = listOf(5, 15, 25, 45)
@@ -25,6 +36,13 @@ object AppPrefs {
     fun setGoalsNotification(ctx: Context, on: Boolean) {
         prefs(ctx).edit { putBoolean(GOALS_NOTIFICATION, on) }
         GoalsNotification.update(ctx)
+    }
+
+    fun bubbleNudge(ctx: Context) = prefs(ctx).getBoolean(BUBBLE_NUDGE, false)
+
+    fun setBubbleNudge(ctx: Context, on: Boolean) {
+        prefs(ctx).edit { putBoolean(BUBBLE_NUDGE, on) }
+        _bubbleNudge.value = on
     }
 
     fun askedNotifications(ctx: Context) = prefs(ctx).getBoolean(ASKED_NOTIFICATIONS, false)

@@ -56,6 +56,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -77,6 +78,7 @@ import dev.junjo.anchor.data.ReminderStore
 import dev.junjo.anchor.timer.FocusTimer
 import dev.junjo.anchor.ui.AnchorTheme
 import dev.junjo.anchor.ui.DurationDialog
+import dev.junjo.anchor.ui.rememberNow
 import kotlinx.coroutines.delay
 
 /**
@@ -98,7 +100,7 @@ class QuickAddActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        show(intent, serial = 0)
+        show(intent, serial = savedInstanceState?.getInt(STATE_SERIAL, 0) ?: 0)
         setContent {
             AnchorTheme {
                 val r = request ?: return@AnchorTheme
@@ -113,6 +115,11 @@ class QuickAddActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        request?.let { outState.putInt(STATE_SERIAL, it.serial) }
     }
 
     /** Already open (single task) and asked for another kind: swap the sheet in place. */
@@ -145,6 +152,7 @@ class QuickAddActivity : ComponentActivity() {
         const val ACTION_FOCUS = "dev.junjo.anchor.FOCUS"
         private const val EXTRA_TEXT = "text"
         private const val EXTRA_GOAL = "goal"
+        private const val STATE_SERIAL = "serial"
 
         /** [text] fills the field, or for focus names what it's for; [goalId] ties a timer to a goal. */
         fun open(ctx: Context, kind: Kind, text: String? = null, goalId: String? = null) {
@@ -210,11 +218,12 @@ private fun SheetTitle(text: String) {
 private fun AddContent(kind: QuickAddActivity.Kind, initialText: String, onClose: () -> Unit) {
     val note = kind == QuickAddActivity.Kind.NOTE
     val remind = kind == QuickAddActivity.Kind.REMIND
-    var text by remember { mutableStateOf(initialText) }
-    var added by remember { mutableIntStateOf(0) }
-    var inMinutes by remember { mutableIntStateOf(30) }
-    var alarm by remember { mutableStateOf(false) }
-    var picking by remember { mutableStateOf(false) }
+    var text by rememberSaveable { mutableStateOf(initialText) }
+    var added by rememberSaveable { mutableIntStateOf(0) }
+    var inMinutes by rememberSaveable { mutableIntStateOf(30) }
+    var alarm by rememberSaveable { mutableStateOf(false) }
+    var picking by rememberSaveable { mutableStateOf(false) }
+    val now = rememberNow(active = remind, periodMs = 15_000L)
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
 
@@ -224,7 +233,7 @@ private fun AddContent(kind: QuickAddActivity.Kind, initialText: String, onClose
         keyboard?.show()
     }
 
-    fun at() = System.currentTimeMillis() + inMinutes * 60_000L
+    fun at(base: Long = System.currentTimeMillis()) = base + inMinutes * 60_000L
 
     fun save(): Boolean {
         if (text.isBlank()) return false
@@ -311,8 +320,8 @@ private fun AddContent(kind: QuickAddActivity.Kind, initialText: String, onClose
             Text(
                 when {
                     !remind -> "Save"
-                    alarm -> "Ring at ${clockTime(at())}"
-                    else -> "Remind me at ${clockTime(at())}"
+                    alarm -> "Ring at ${clockTime(at(now))}"
+                    else -> "Remind me at ${clockTime(at(now))}"
                 },
             )
         }
@@ -328,10 +337,10 @@ private fun AddContent(kind: QuickAddActivity.Kind, initialText: String, onClose
 private fun FocusContent(label: String?, goalId: String?, onClose: () -> Unit) {
     val ctx = LocalContext.current
     val timer by FocusTimer.state.collectAsState()
-    var focus by remember { mutableIntStateOf(AppPrefs.focusMinutes(ctx)) }
-    var ready by remember { mutableIntStateOf(AppPrefs.readyMinutes(ctx)) }
-    var picking by remember { mutableStateOf<String?>(null) }
-    var menu by remember { mutableStateOf(false) }
+    var focus by rememberSaveable { mutableIntStateOf(AppPrefs.focusMinutes(ctx)) }
+    var ready by rememberSaveable { mutableIntStateOf(AppPrefs.readyMinutes(ctx)) }
+    var picking by rememberSaveable { mutableStateOf<String?>(null) }
+    var menu by rememberSaveable { mutableStateOf(false) }
 
     fun go(readyMinutes: Int) {
         AppPrefs.setFocusMinutes(ctx, focus)

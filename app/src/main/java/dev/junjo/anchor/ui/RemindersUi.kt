@@ -49,6 +49,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,6 +76,7 @@ import java.time.format.DateTimeFormatter
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 fun LazyListScope.remindersSection(
     reminders: List<Reminder>,
+    refresh: Int = 0,
     onEdit: (Reminder) -> Unit,
 ) {
     if (reminders.isEmpty()) {
@@ -89,14 +91,21 @@ fun LazyListScope.remindersSection(
         }
     }
     itemsIndexed(reminders, key = { _, r -> "reminder-${r.id}" }) { i, r ->
-        ReminderRow(r, segmentShape(i, reminders.size), Modifier.animateItem(), onEdit = { onEdit(r) })
+        ReminderRow(r, segmentShape(i, reminders.size), refresh, Modifier.animateItem(), onEdit = { onEdit(r) })
     }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun ReminderRow(r: Reminder, shape: androidx.compose.ui.graphics.Shape, modifier: Modifier, onEdit: () -> Unit) {
+private fun ReminderRow(r: Reminder, shape: androidx.compose.ui.graphics.Shape, refresh: Int, modifier: Modifier, onEdit: () -> Unit) {
     val dim = if (r.enabled) 1f else 0.5f
+    val headline = remember(r, refresh) {
+        when {
+            r.once -> whenText(r.startAt)
+            r.repeatsByInterval -> Reminders.next(r)?.let { "Next ${whenText(it)}" } ?: r.timeText
+            else -> r.timeText
+        }
+    }
     Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainer, modifier = modifier.fillMaxWidth()) {
         Row(
             Modifier.clickable(enabled = !r.once, onClick = onEdit).padding(start = 20.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
@@ -105,11 +114,7 @@ private fun ReminderRow(r: Reminder, shape: androidx.compose.ui.graphics.Shape, 
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        when {
-                            r.once -> whenText(r.startAt)
-                            r.repeatsByInterval -> Reminders.next(r)?.let { "Next ${whenText(it)}" } ?: r.timeText
-                            else -> r.timeText
-                        },
+                        headline,
                         style = MaterialTheme.typography.headlineSmallEmphasized,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = dim),
                     )
@@ -155,15 +160,15 @@ fun ReminderSheet(initial: Reminder?, onDismiss: () -> Unit) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val defaultTime = remember { LocalTime.now().plusHours(1).withMinute(0) }
 
-    var text by remember { mutableStateOf(initial?.text ?: "") }
-    var days by remember { mutableIntStateOf(initial?.days ?: Reminder.ALL_DAYS) }
-    var addAsGoal by remember { mutableStateOf(initial?.addAsGoal ?: true) }
-    var alarm by remember { mutableStateOf(initial?.alarm ?: false) }
-    var byInterval by remember { mutableStateOf(initial?.repeatsByInterval ?: false) }
-    var everyDays by remember {
+    var text by rememberSaveable { mutableStateOf(initial?.text ?: "") }
+    var days by rememberSaveable { mutableIntStateOf(initial?.days ?: Reminder.ALL_DAYS) }
+    var addAsGoal by rememberSaveable { mutableStateOf(initial?.addAsGoal ?: true) }
+    var alarm by rememberSaveable { mutableStateOf(initial?.alarm ?: false) }
+    var byInterval by rememberSaveable { mutableStateOf(initial?.repeatsByInterval ?: false) }
+    var everyDays by rememberSaveable {
         mutableIntStateOf(initial?.takeIf { it.repeatsByInterval }?.let { it.everyMinutes / Reminder.DAY_MINUTES } ?: 2)
     }
-    var everyHours by remember {
+    var everyHours by rememberSaveable {
         mutableIntStateOf(initial?.takeIf { it.repeatsByInterval }?.let { (it.everyMinutes % Reminder.DAY_MINUTES) / 60 } ?: 0)
     }
     val time = rememberTimePickerState(
@@ -186,7 +191,7 @@ fun ReminderSheet(initial: Reminder?, onDismiss: () -> Unit) {
             minute = time.minute,
             days = days,
             addAsGoal = addAsGoal,
-            enabled = true,
+            enabled = initial?.enabled ?: true,
             alarm = alarm,
             everyMinutes = everyMinutes,
             startAt = when {

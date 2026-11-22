@@ -18,6 +18,7 @@ class AnchorApp : Application() {
         // Everything (screens, widget, receivers, tile) runs in this one process, so loading the
         // stores here means every entry point sees the same goals and timer.
         Notifications.createChannels(this)
+        AppPrefs.init(this)
         GoalStore.init(this)
         FocusTimer.init(this)
         FocusTimer.catchUp()

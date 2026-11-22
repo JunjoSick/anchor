@@ -26,7 +26,7 @@ object GoalStore {
     private const val TAG = "GoalStore"
     private const val FILE_NAME = "goals.json"
 
-    /** Finished and deleted goals are kept this long, for the weekly review planned for v0.3. */
+    /** Finished and deleted goals are kept this long before pruning. */
     private const val HISTORY_MS = 90L * 24 * 60 * 60 * 1000
 
     private lateinit var appContext: Context
@@ -73,6 +73,14 @@ object GoalStore {
     fun restore(id: String) = edit(id) { it.copy(deleted = false) }
 
     fun keepForToday(id: String) = edit(id) { it.copy(day = today()) }
+
+    /** Moves a goal to the top of the list (and onto the floating pill and notification). */
+    fun putFirst(id: String) = edit(id) { it.copy(pinnedAt = System.currentTimeMillis()) }
+
+    fun merge(incoming: List<Goal>) {
+        if (incoming.isEmpty()) return
+        update { prune(Backup.mergeById(it, incoming, Goal::id, Goal::updatedAt)) }
+    }
 
     fun keepAllForToday() {
         val day = today()

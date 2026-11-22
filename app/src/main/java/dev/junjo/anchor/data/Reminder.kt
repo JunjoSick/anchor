@@ -154,6 +154,10 @@ data class Reminder(
 object ReminderStore {
     private const val TAG = "ReminderStore"
 
+    /** Deleted repeating reminders are kept this long before pruning, matching [GoalStore]. */
+    internal const val HISTORY_MS = 90L * 24 * 60 * 60 * 1000
+    internal const val ONCE_KEEP_MS = 24L * 60 * 60 * 1000
+
     private lateinit var appContext: Context
     private lateinit var file: AtomicFile
     private val lock = Any()
@@ -166,9 +170,15 @@ object ReminderStore {
         if (::file.isInitialized) return
         appContext = context.applicationContext
         file = AtomicFile(File(appContext.filesDir, "reminders.json"))
-        // One-offs that went off over a day ago are finished with (a snooze is long over).
-        val cutoff = System.currentTimeMillis() - 24 * 60 * 60 * 1000L
-        _reminders.value = read().filter { !(it.once && it.startAt < cutoff) }
+        _reminders.value = prune(read())
+    }
+
+    internal fun prune(reminders: List<Reminder>, now: Long = System.currentTimeMillis()): List<Reminder> {
+        // One-offs that went off over a day ago are finished with (a snooze is long over);
+        // deleted repeating reminders drop out after the history window.
+        val onceCutoff = now - ONCE_KEEP_MS
+        val deletedCutoff = now - HISTORY_MS
+        return reminders.filter { !(it.once && it.startAt < onceCutoff) && (!it.deleted || it.updatedAt >= deletedCutoff) }
     }
 
     fun find(id: String): Reminder? = _reminders.value.firstOrNull { it.id == id }
@@ -192,6 +202,16 @@ object ReminderStore {
 
     fun delete(id: String) {
         find(id)?.let { save(it.copy(deleted = true)) }
+    }
+
+    fun merge(incoming: List<Reminder>) {
+        if (incoming.isEmpty()) return
+        synchronized(lock) {
+            val next = prune(Backup.mergeById(_reminders.value, incoming, Reminder::id, Reminder::updatedAt))
+            _reminders.value = next
+            disk.execute { write(next) }
+        }
+        Reminders.scheduleAll(appContext)
     }
 
     private fun read(): List<Reminder> = try {

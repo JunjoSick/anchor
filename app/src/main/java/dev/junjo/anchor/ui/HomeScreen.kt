@@ -101,6 +101,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import dev.junjo.anchor.QuickAddTileService
 import dev.junjo.anchor.NoteTileService
 import dev.junjo.anchor.R
+import dev.junjo.anchor.data.Backup
 import dev.junjo.anchor.data.Goal
 import dev.junjo.anchor.data.GoalStore
 import dev.junjo.anchor.data.active
@@ -111,7 +112,9 @@ import dev.junjo.anchor.notify.Notifications
 import dev.junjo.anchor.overlay.FloatingGoals
 import dev.junjo.anchor.timer.FocusTimer
 import dev.junjo.anchor.widget.Widgets
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Past this many open goals, suggest trimming: working memory holds only a handful of things. */
 private const val SOFT_LIMIT = 5
@@ -126,9 +129,9 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}) {
     val goals by GoalStore.goals.collectAsStateWithLifecycle()
     val allNotes by NoteStore.notes.collectAsStateWithLifecycle()
     val timer by FocusTimer.state.collectAsStateWithLifecycle()
-    var settingsOpen by remember { mutableStateOf(false) }
-    var editingGoal by remember { mutableStateOf<Goal?>(null) }
-    var editingNote by remember { mutableStateOf<Note?>(null) }
+    var settingsOpen by rememberSaveable { mutableStateOf(false) }
+    var editingGoalId by rememberSaveable { mutableStateOf<String?>(null) }
+    var editingNoteId by rememberSaveable { mutableStateOf<String?>(null) }
     var showDone by rememberSaveable { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -267,7 +270,7 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}) {
                     onFocus = { QuickAddActivity.open(ctx, QuickAddActivity.Kind.FOCUS, goal.text, goal.id) },
                     onEdit = {
                         view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                        editingGoal = goal
+                        editingGoalId = goal.id
                     },
                 )
             }
@@ -286,7 +289,7 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}) {
             if (notes.isNotEmpty()) {
                 item(key = "notes-header") { SectionHeader("Notes", Modifier.animateItem()) }
                 itemsIndexed(notes, key = { _, n -> n.id }) { i, note ->
-                    NoteRow(note, segmentShape(i, notes.size), Modifier.animateItem()) { editingNote = note }
+                    NoteRow(note, segmentShape(i, notes.size), Modifier.animateItem()) { editingNoteId = note.id }
                 }
             }
 
@@ -316,7 +319,9 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}) {
         }
     }
 
+    val editingGoal = editingGoalId?.let { id -> goals.firstOrNull { it.id == id && it.isActive } }
     editingGoal?.let { goal ->
+        val canPutFirst = active.size > 1 && active.firstOrNull()?.id != goal.id
         key(goal.id) {
             EditSheet(
                 initial = goal.text,
@@ -324,18 +329,27 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}) {
                 otherLabel = "Remind me…",
                 onOther = { text ->
                     GoalStore.rename(goal.id, text)
-                    editingGoal = null
+                    editingGoalId = null
                     QuickAddActivity.open(ctx, QuickAddActivity.Kind.REMIND, text.trim())
                 },
-                onDelete = { editingGoal = null; remove(goal) },
+                extraLabel = if (canPutFirst) "Put first" else null,
+                onExtra = if (canPutFirst) {
+                    { text ->
+                        if (text.trim() != goal.text) GoalStore.rename(goal.id, text)
+                        GoalStore.putFirst(goal.id)
+                        editingGoalId = null
+                    }
+                } else null,
+                onDelete = { editingGoalId = null; remove(goal) },
                 onClose = { text ->
                     if (text.trim() != goal.text) GoalStore.rename(goal.id, text)
-                    editingGoal = null
+                    editingGoalId = null
                 },
             )
         }
     }
 
+    val editingNote = editingNoteId?.let { id -> allNotes.firstOrNull { it.id == id && !it.deleted } }
     editingNote?.let { note ->
         key(note.id) {
             EditSheet(
@@ -343,23 +357,22 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}) {
                 multiLine = true,
                 otherLabel = "Make it a goal",
                 onOther = { text ->
-                    // A goal is one short line: the note's first line becomes the goal.
+                    // Save any edit, keep the note intact, and copy its first line onto today's goals.
+                    if (text.trim() != note.text) NoteStore.edit(note.id, text)
                     val goal = GoalStore.add(text.lineSequence().first { it.isNotBlank() })
-                    NoteStore.delete(note.id)
-                    editingNote = null
-                    offerUndo("Moved to your goals") {
-                        NoteStore.restore(note.id)
+                    editingNoteId = null
+                    offerUndo("Added to your goals") {
                         goal?.let { GoalStore.delete(it.id) }
                     }
                 },
                 onDelete = {
                     NoteStore.delete(note.id)
-                    editingNote = null
+                    editingNoteId = null
                     offerUndo("Note deleted") { NoteStore.restore(note.id) }
                 },
                 onClose = { text ->
                     if (text.trim() != note.text) NoteStore.edit(note.id, text)
-                    editingNote = null
+                    editingNoteId = null
                 },
             )
         }
@@ -368,7 +381,17 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}) {
     if (settingsOpen) {
         ModalBottomSheet(onDismissRequest = { settingsOpen = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).navigationBarsPadding().padding(bottom = 16.dp)) {
-                SettingsSection(refresh = resumes, onShowSetup = { resumes++; settingsOpen = false })
+                SettingsSection(
+                    refresh = resumes,
+                    onShowSetup = { resumes++; settingsOpen = false },
+                    onMessage = { msg ->
+                        settingsOpen = false
+                        scope.launch {
+                            snackbar.currentSnackbarData?.dismiss()
+                            snackbar.showSnackbar(msg)
+                        }
+                    },
+                )
             }
         }
     }
@@ -676,10 +699,41 @@ private fun setupItems(ctx: Context, onWidgetUnsupported: () -> Unit): List<Setu
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun SettingsSection(refresh: Int, onShowSetup: () -> Unit) {
+private fun SettingsSection(refresh: Int, onShowSetup: () -> Unit, onMessage: (String) -> Unit) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     var goalsNotification by remember { mutableStateOf(AppPrefs.goalsNotification(ctx)) }
     var bubble by remember(refresh) { mutableStateOf(FloatingGoals.isOn(ctx)) }
+    var bubbleNudge by remember { mutableStateOf(AppPrefs.bubbleNudge(ctx)) }
+
+    val exportBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    val json = Backup.exportJson()
+                    ctx.contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+                        ?: error("Could not open destination")
+                }.isSuccess
+            }
+            onMessage(if (ok) "Backup saved" else "Couldn't save backup")
+        }
+    }
+
+    val importBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val raw = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+                        ?: error("Could not read file")
+                    Backup.importJson(raw)
+                }
+            }
+            onMessage(result.fold(onSuccess = { it.message() }, onFailure = { "Couldn't read that backup file" }))
+        }
+    }
+
     Column(Modifier.padding(top = 8.dp)) {
         Text(
             "Always in sight",
@@ -691,20 +745,49 @@ private fun SettingsSection(refresh: Int, onShowSetup: () -> Unit) {
             title = "Floating goal bubble",
             about = "A small pill over every app with your top goal, or the countdown while a timer runs. Tap it for the list; drag it anywhere, or push it off the side to tuck it into the edge.",
             checked = bubble,
-            shape = segmentShape(0, 2),
+            shape = segmentShape(0, 3),
         ) {
             bubble = it
             if (it) FloatingGoals.enable(ctx) else FloatingGoals.disable(ctx)
         }
         Spacer(Modifier.height(2.dp))
         SettingRow(
+            title = "Nudge tucked bubble",
+            about = "Briefly flashes the tucked edge tab red every few minutes while you still have open goals.",
+            checked = bubbleNudge,
+            shape = segmentShape(1, 3),
+        ) {
+            bubbleNudge = it
+            AppPrefs.setBubbleNudge(ctx, it)
+        }
+        Spacer(Modifier.height(2.dp))
+        SettingRow(
             title = "Goals in notifications",
             about = "Shows your list on the lock screen and lets you add a goal from the notification shade.",
             checked = goalsNotification,
-            shape = segmentShape(1, 2),
+            shape = segmentShape(2, 3),
         ) {
             goalsNotification = it
             AppPrefs.setGoalsNotification(ctx, it)
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "Backup",
+            style = MaterialTheme.typography.titleMediumEmphasized,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(start = 8.dp, bottom = 8.dp),
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilledTonalButton(
+                onClick = { exportBackup.launch("anchor-${today()}.json") },
+                shapes = ButtonDefaults.shapes(),
+                modifier = Modifier.weight(1f),
+            ) { Text("Export") }
+            FilledTonalButton(
+                onClick = { importBackup.launch(arrayOf("application/json", "text/plain", "*/*")) },
+                shapes = ButtonDefaults.shapes(),
+                modifier = Modifier.weight(1f),
+            ) { Text("Import") }
         }
         Spacer(Modifier.height(8.dp))
         if (Build.VERSION.SDK_INT >= 33) {

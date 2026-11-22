@@ -167,7 +167,7 @@ private fun TimerChip(timer: FocusTimer.State) {
         FocusTimer.Status.RUNNING ->
             if (timer.isGettingReady) "▶ focus at ${clockTime(timer.endAt)}" else "⏱ until ${clockTime(timer.endAt)}"
         FocusTimer.Status.PAUSED -> "⏸ paused"
-        FocusTimer.Status.RINGING -> "⏰ time's up"
+        FocusTimer.Status.RINGING -> if (timer.isReadyRinging) "▶ time to start" else "⏰ time's up"
         FocusTimer.Status.IDLE -> return
     }
     Text(

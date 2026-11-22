@@ -1,5 +1,6 @@
 package dev.junjo.anchor.ui
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -27,7 +28,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,8 +38,8 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 
 /**
- * One sheet for changing a goal or a note: the text, Delete, the one other thing you might want
- * to do with it, and Done. Closing it any way keeps the edit, so there is no Save to forget.
+ * One sheet for changing a goal or a note: the text, Delete, the one or two other things you might
+ * want to do with it, and Done. Closing it any way keeps the edit, so there is no Save to forget.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -49,8 +50,10 @@ fun EditSheet(
     onOther: (text: String) -> Unit,
     onDelete: () -> Unit,
     onClose: (text: String) -> Unit,
+    extraLabel: String? = null,
+    onExtra: ((text: String) -> Unit)? = null,
 ) {
-    var text by remember { mutableStateOf(initial) }
+    var text by rememberSaveable { mutableStateOf(initial) }
     ModalBottomSheet(onDismissRequest = { onClose(text) }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.padding(horizontal = 24.dp).navigationBarsPadding().imePadding().padding(bottom = 16.dp)) {
             TextField(
@@ -71,17 +74,37 @@ fun EditSheet(
                 ),
                 keyboardActions = KeyboardActions(onDone = { onClose(text) }),
             )
-            Spacer(Modifier.height(12.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onDelete, shapes = ButtonDefaults.shapes()) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error)
+            if (extraLabel != null && onExtra != null) {
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
+                    FilledTonalButton(onClick = { onExtra(text) }, enabled = text.isNotBlank(), shapes = ButtonDefaults.shapes()) {
+                        Text(extraLabel)
+                    }
+                    FilledTonalButton(onClick = { onOther(text) }, enabled = text.isNotBlank(), shapes = ButtonDefaults.shapes()) {
+                        Text(otherLabel)
+                    }
                 }
-                Spacer(Modifier.weight(1f))
-                FilledTonalButton(onClick = { onOther(text) }, enabled = text.isNotBlank(), shapes = ButtonDefaults.shapes()) {
-                    Text(otherLabel)
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onDelete, shapes = ButtonDefaults.shapes()) {
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Button(onClick = { onClose(text) }, shapes = ButtonDefaults.shapes()) { Text("Done") }
                 }
-                Spacer(Modifier.size(8.dp))
-                Button(onClick = { onClose(text) }, shapes = ButtonDefaults.shapes()) { Text("Done") }
+            } else {
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onDelete, shapes = ButtonDefaults.shapes()) {
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    FilledTonalButton(onClick = { onOther(text) }, enabled = text.isNotBlank(), shapes = ButtonDefaults.shapes()) {
+                        Text(otherLabel)
+                    }
+                    Spacer(Modifier.size(8.dp))
+                    Button(onClick = { onClose(text) }, shapes = ButtonDefaults.shapes()) { Text("Done") }
+                }
             }
         }
     }

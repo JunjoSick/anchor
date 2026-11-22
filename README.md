@@ -8,9 +8,9 @@ or **[⬇ download Anchor.apk](https://github.com/JunjoSick/anchor/releases/late
 
 ## What it does
 
-- **Today:** your goals, with notes underneath. Tap a goal to tick it off, long-press to change it.
-- **+:** *Goal*, *Note*, *Remind me*, *Focus*. Also on the floating bubble, the widget, Quick Settings and the app icon's long-press menu.
-- **Focus:** ▶ next to a goal, pick how long, *Start*. Or *Start in 5 min* to wrap up first. Counts down in the status bar and rings until you tap Done.
+- **Today:** your goals, with notes underneath. Tap a goal to tick it off, long-press to change or put it first.
+- **+:** *Goal*, *Note*, *Remind me*, *Focus* (also on the app icon's long-press menu). Goal and Note are on the floating bubble, the widget and Quick Settings too.
+- **Focus:** ▶ next to a goal (on Today or the floating bubble), pick how long, *Start*. Or *Start in 5 min* to wrap up first — it rings when it's time to start. Counts down in the status bar and rings until you tap Done.
 - **Reminders** (the bell on Today): once, on set days, or every few days or hours. Make one ring like an alarm when it matters. When one goes off it waits on your list until you tick it off.
 - **No guilt:** yesterday's unfinished goals ask once: keep or drop.
 

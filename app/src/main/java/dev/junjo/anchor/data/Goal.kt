@@ -19,6 +19,8 @@ data class Goal(
     val updatedAt: Long,
     val doneAt: Long? = null,
     val deleted: Boolean = false,
+    /** When the user pinned this goal to the top; most recently pinned comes first. */
+    val pinnedAt: Long? = null,
 ) {
     val isActive: Boolean get() = !deleted && doneAt == null
 
@@ -30,6 +32,7 @@ data class Goal(
         put("updatedAt", updatedAt)
         if (doneAt != null) put("doneAt", doneAt)
         put("deleted", deleted)
+        if (pinnedAt != null) put("pinnedAt", pinnedAt)
     }
 
     companion object {
@@ -41,6 +44,7 @@ data class Goal(
             updatedAt = o.getLong("updatedAt"),
             doneAt = if (o.has("doneAt")) o.getLong("doneAt") else null,
             deleted = o.optBoolean("deleted", false),
+            pinnedAt = if (o.has("pinnedAt")) o.getLong("pinnedAt") else null,
         )
     }
 }
@@ -52,8 +56,9 @@ fun startOfToday(): Long =
 
 // The views of the list that the screen, widget and notification all share.
 
-/** Goals still to do, in the order they were added. */
-fun List<Goal>.active(): List<Goal> = filter { it.isActive }.sortedBy { it.createdAt }
+/** Goals still to do: any put first (most recent on top), then the rest in the order added. */
+fun List<Goal>.active(): List<Goal> =
+    filter { it.isActive }.sortedWith(compareByDescending<Goal> { it.pinnedAt ?: Long.MIN_VALUE }.thenBy { it.createdAt })
 
 /** Goals still to do that were planned for an earlier day and need a keep-or-drop decision. */
 fun List<Goal>.carriedOver(today: String = today()): List<Goal> = active().filter { it.day < today }

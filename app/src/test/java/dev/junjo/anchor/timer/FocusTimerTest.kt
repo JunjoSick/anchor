@@ -85,17 +85,13 @@ class FocusTimerTest {
         val ready = gettingReady(5, 25, endsIn = 2 * MINUTE)
         assertSame(ready, FocusTimer.afterRestart(ready, now))
 
-        // The phone was off when the countdown ended: focus started then, and is still going.
+        // The phone was off when the get-ready countdown ended: wait ringing for the user to start.
         val missedStart = gettingReady(5, 25, endsIn = -10 * MINUTE)
-        val focus = FocusTimer.afterRestart(missedStart, now)
-        assertEquals(Phase.FOCUS, focus.phase)
-        assertEquals(Status.RUNNING, focus.status)
-        assertEquals(now + 15 * MINUTE, focus.endAt)
-
-        // Off for longer than both: the focus block has finished too.
-        val missedAll = FocusTimer.afterRestart(gettingReady(5, 25, endsIn = -40 * MINUTE), now)
-        assertEquals(Status.RINGING, missedAll.status)
-        assertEquals(Phase.FOCUS, missedAll.phase)
+        val ringing = FocusTimer.afterRestart(missedStart, now)
+        assertEquals(Phase.READY, ringing.phase)
+        assertEquals(Status.RINGING, ringing.status)
+        assertTrue(ringing.isReadyRinging)
+        assertEquals(25 * MINUTE, ringing.focusMs)
 
         // Paused while getting ready stays paused.
         val paused = gettingReady(5, 25).copy(status = Status.PAUSED, remainingMs = MINUTE)

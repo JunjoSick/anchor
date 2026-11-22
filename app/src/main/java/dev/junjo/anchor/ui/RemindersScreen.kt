@@ -26,14 +26,18 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.junjo.anchor.QuickAddActivity
 import dev.junjo.anchor.R
@@ -46,11 +50,14 @@ import dev.junjo.anchor.data.ReminderStore
 fun RemindersScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
     val all by ReminderStore.reminders.collectAsStateWithLifecycle()
-    // Re-sorted on each change; a one-off that has gone off drops out when the list next changes
-    // or the page is opened again.
-    val reminders = remember(all) { ReminderStore.visible(all) }
-    var sheetOpen by remember { mutableStateOf(false) }
-    var editing by remember { mutableStateOf<Reminder?>(null) }
+    // Re-checked when the screen comes back to the front, so past one-offs drop out and
+    // "Next …" times for intervals stay current.
+    var resumes by remember { mutableIntStateOf(0) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { resumes++ }
+    val reminders = remember(all, resumes) { ReminderStore.visible(all) }
+    var sheetOpen by rememberSaveable { mutableStateOf(false) }
+    var editingId by rememberSaveable { mutableStateOf<String?>(null) }
+    val editing = editingId?.let { id -> all.firstOrNull { it.id == id && !it.deleted } }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -90,7 +97,7 @@ fun RemindersScreen(onBack: () -> Unit) {
                         Text("Once")
                     }
                     FilledTonalButton(
-                        onClick = { editing = null; sheetOpen = true },
+                        onClick = { editingId = null; sheetOpen = true },
                         shapes = ButtonDefaults.shapes(),
                         modifier = tall.weight(1f),
                     ) {
@@ -100,7 +107,7 @@ fun RemindersScreen(onBack: () -> Unit) {
                     }
                 }
             }
-            remindersSection(reminders = reminders, onEdit = { editing = it; sheetOpen = true })
+            remindersSection(reminders = reminders, refresh = resumes, onEdit = { editingId = it.id; sheetOpen = true })
             item(key = "end") { Spacer(Modifier.height(8.dp)) }
         }
     }

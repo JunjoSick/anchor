@@ -51,6 +51,9 @@ fun List<Note>.visible(): List<Note> = filter { !it.deleted }.sortedByDescending
 object NoteStore {
     private const val TAG = "NoteStore"
 
+    /** Deleted notes are kept this long before pruning, matching [GoalStore]. */
+    internal const val HISTORY_MS = 90L * 24 * 60 * 60 * 1000
+
     private lateinit var appContext: Context
     private lateinit var file: AtomicFile
     private val lock = Any()
@@ -63,7 +66,12 @@ object NoteStore {
         if (::file.isInitialized) return
         appContext = context.applicationContext
         file = AtomicFile(File(appContext.filesDir, "notes.json"))
-        _notes.value = read()
+        _notes.value = prune(read())
+    }
+
+    internal fun prune(notes: List<Note>, now: Long = System.currentTimeMillis()): List<Note> {
+        val cutoff = now - HISTORY_MS
+        return notes.filter { !it.deleted || it.updatedAt >= cutoff }
     }
 
     /** Returns null if the text was blank. Line breaks are kept: a note can be a list. */
@@ -88,6 +96,11 @@ object NoteStore {
     fun delete(id: String) = change(id) { it.copy(deleted = true) }
 
     fun restore(id: String) = change(id) { it.copy(deleted = false) }
+
+    fun merge(incoming: List<Note>) {
+        if (incoming.isEmpty()) return
+        update { prune(Backup.mergeById(it, incoming, Note::id, Note::updatedAt)) }
+    }
 
     private fun change(id: String, how: (Note) -> Note) {
         val now = System.currentTimeMillis()

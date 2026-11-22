@@ -7,8 +7,14 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class GoalTest {
-    private fun goal(id: String, day: String = "2026-11-14", createdAt: Long = 0, doneAt: Long? = null, deleted: Boolean = false) =
-        Goal(id, "Goal $id", day, createdAt, createdAt, doneAt, deleted)
+    private fun goal(
+        id: String,
+        day: String = "2026-11-14",
+        createdAt: Long = 0,
+        doneAt: Long? = null,
+        deleted: Boolean = false,
+        pinnedAt: Long? = null,
+    ) = Goal(id, "Goal $id", day, createdAt, createdAt, doneAt, deleted, pinnedAt)
 
     private fun ms(text: String) = at(ROME, text).toInstant().toEpochMilli()
 
@@ -21,6 +27,16 @@ class GoalTest {
             goal("b", createdAt = 2),
         )
         assertEquals(listOf("a", "b", "c"), goals.active().map { it.id })
+    }
+
+    @Test fun pinnedGoalsComeFirstMostRecentOnTop() {
+        val goals = listOf(
+            goal("a", createdAt = 1),
+            goal("b", createdAt = 2, pinnedAt = 100),
+            goal("c", createdAt = 3, pinnedAt = 200),
+            goal("d", createdAt = 4),
+        )
+        assertEquals(listOf("c", "b", "a", "d"), goals.active().map { it.id })
     }
 
     @Test fun carriedOverAcrossMonthAndYearEnds() {
@@ -44,7 +60,7 @@ class GoalTest {
     }
 
     @Test fun jsonRoundTrip() {
-        for (g in listOf(goal("a", doneAt = 42), goal("b"), goal("c", deleted = true))) {
+        for (g in listOf(goal("a", doneAt = 42), goal("b", pinnedAt = 99), goal("c", deleted = true))) {
             assertEquals(g, Goal.fromJson(JSONObject(g.toJson().toString())))
         }
     }

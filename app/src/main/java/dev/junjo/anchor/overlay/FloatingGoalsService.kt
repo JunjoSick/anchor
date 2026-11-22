@@ -7,8 +7,16 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.res.Configuration
 import android.os.PowerManager
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.graphics.lerp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import dev.junjo.anchor.AppPrefs
 import dev.junjo.anchor.ui.rememberNow
 import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
@@ -215,6 +223,19 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
         super.onDestroy()
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (view == null) return
+        animator?.cancel()
+        unfreezeSize()
+        val w = width()
+        val h = height()
+        params.y = params.y.coerceIn(0, (screenHeight() - h).coerceAtLeast(0))
+        params.x = if (dock != Dock.NONE) 0 else params.x.coerceIn(0, (screenWidth() - w).coerceAtLeast(0))
+        applyNow()
+        save()
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     private fun addBubble() {
         val (x, y) = FloatingGoals.position(this)
@@ -237,7 +258,7 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
         ).apply {
             gravity = Gravity.TOP or (if (anchorRight) Gravity.RIGHT else Gravity.LEFT)
             this.x = if (dock != Dock.NONE) 0 else x.coerceAtLeast(0)
-            this.y = y
+            this.y = y.coerceIn(0, (screenHeight() - dp(76f).toInt()).coerceAtLeast(0))
         }
 
         val compose = ComposeView(this).apply {
@@ -253,15 +274,18 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
                 // Touches on the bubble are ours, not the system's edge-swipe Back gesture.
                 v.systemGestureExclusionRects = listOf(android.graphics.Rect(0, 0, right - left, bottom - top))
                 val w = right - left
+                val h = bottom - top
                 if (revealPending && w != oldRight - oldLeft) {
                     reveal(w)
                     return@addOnLayoutChangeListener
                 }
                 if (dragging || revealPending || animator?.isRunning == true) return@addOnLayoutChangeListener
-                // Keep it fully on screen after a size change (e.g. the list opening).
-                val target = if (dock != Dock.NONE) 0 else params.x.coerceIn(0, (screenWidth() - w).coerceAtLeast(0))
-                if (target != params.x) {
-                    params.x = target
+                // Keep it fully on screen after a size or screen-orientation change (e.g. the list opening).
+                val targetX = if (dock != Dock.NONE) 0 else params.x.coerceIn(0, (screenWidth() - w).coerceAtLeast(0))
+                val targetY = params.y.coerceIn(0, (screenHeight() - h).coerceAtLeast(0))
+                if (targetX != params.x || targetY != params.y) {
+                    params.x = targetX
+                    params.y = targetY
                     applyNow()
                     save()
                 }
@@ -281,6 +305,10 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
                         gestures = BubbleGestures(::dragStart, ::dragMove, ::dragEnd),
                         onUntuck = ::untuck,
                         onTuck = { tuck(if (leftX() + width() / 2 > screenWidth() / 2) Dock.RIGHT else Dock.LEFT) },
+                        onFocus = { goal ->
+                            showList(false)
+                            QuickAddActivity.open(this@FloatingGoalsService, QuickAddActivity.Kind.FOCUS, goal.text, goal.id)
+                        },
                         onAdd = { kind ->
                             showList(false)
                             QuickAddActivity.open(this@FloatingGoalsService, kind)
@@ -492,6 +520,9 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
     }
 }
 
+/** How often the tucked edge tab pulses red when the nudge setting is on (active screen-on time). */
+private const val TUCK_NUDGE_INTERVAL_MS = 3 * 60_000L
+
 @Composable
 private fun Bubble(
     expanded: Boolean,
@@ -500,20 +531,22 @@ private fun Bubble(
     gestures: BubbleGestures,
     onUntuck: () -> Unit,
     onTuck: () -> Unit,
+    onFocus: (Goal) -> Unit,
     onAdd: (QuickAddActivity.Kind) -> Unit,
     onOpenApp: () -> Unit,
 ) {
     val goals by GoalStore.goals.collectAsState()
     val timer by FocusTimer.state.collectAsState()
+    val nudge by AppPrefs.bubbleNudgeFlow.collectAsState()
     val active = goals.active()
 
     // Each piece below keeps its own clock (rememberNow), so a tick redraws only the piece that
     // shows the time, and each ticks only as often as what it shows can change.
     when {
-        dock != Dock.NONE -> EdgeTab(dock, active, timer, Modifier.bubbleDrag(gestures, onTap = onUntuck))
+        dock != Dock.NONE -> EdgeTab(dock, active, timer, nudge, Modifier.bubbleDrag(gestures, onTap = onUntuck))
         // Padding leaves room for the shadow inside the overlay window.
         expanded -> Box(Modifier.padding(8.dp)) {
-            ExpandedList(active, timer, Modifier.bubbleDrag(gestures), onAdd, onOpenApp, onTuck)
+            ExpandedList(active, timer, Modifier.bubbleDrag(gestures), onFocus, onAdd, onOpenApp, onTuck)
         }
         else -> Box(Modifier.padding(8.dp)) {
             Pill(
@@ -528,21 +561,44 @@ private fun Bubble(
 /** The tucked-away bubble: a slim tab on the screen edge, still showing the count or the timer. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun EdgeTab(side: Dock, active: List<Goal>, timer: FocusTimer.State, touch: Modifier) {
+private fun EdgeTab(side: Dock, active: List<Goal>, timer: FocusTimer.State, nudge: Boolean, touch: Modifier) {
     // The tab only shows a small disc, which changes visibly far less often than once a second.
     val now = rememberNow(
         active = timer.status == Status.RUNNING,
         periodMs = (timer.totalMs / 120).coerceIn(1_000, 30_000),
         alignTo = timer.endAt,
     )
+    // Optional periodic red pulse while tucked with open goals and no timer running.
+    // Pauses automatically when the screen turns off (lifecycle drops to CREATED).
+    val shouldNudge = nudge && active.isNotEmpty() && !timer.isActive
+    val pulse = remember { Animatable(0f) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(shouldNudge, lifecycle) {
+        pulse.snapTo(0f)
+        if (!shouldNudge) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                delay(TUCK_NUDGE_INTERVAL_MS)
+                repeat(3) {
+                    pulse.animateTo(1f, tween(320))
+                    delay(140)
+                    pulse.animateTo(0f, tween(420))
+                    delay(180)
+                }
+            }
+        }
+    }
+
     val ringing = timer.status == Status.RINGING
     val shape = if (side == Dock.LEFT) RoundedCornerShape(topEnd = 18.dp, bottomEnd = 18.dp)
     else RoundedCornerShape(topStart = 18.dp, bottomStart = 18.dp)
+    val baseBg = if (ringing) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer
+    val baseFg = if (ringing) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onPrimaryContainer
     Surface(
         shape = shape,
-        color = if (ringing) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer,
-        contentColor = if (ringing) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        color = lerp(baseBg, MaterialTheme.colorScheme.error, pulse.value),
+        contentColor = lerp(baseFg, MaterialTheme.colorScheme.onError, pulse.value),
+        border = BorderStroke(1.dp, lerp(MaterialTheme.colorScheme.outlineVariant, MaterialTheme.colorScheme.error, pulse.value)),
         modifier = touch.width(28.dp).height(76.dp),
     ) {
         Column(
@@ -553,7 +609,7 @@ private fun EdgeTab(side: Dock, active: List<Goal>, timer: FocusTimer.State, tou
             when {
                 timer.isActive -> {
                     val fraction = if (timer.totalMs > 0) timer.remaining(now).toFloat() / timer.totalMs else 0f
-                    TimerDisc(fraction, Modifier.size(18.dp))
+                    TimerDisc(fraction, Modifier.size(18.dp), ready = timer.phase == FocusTimer.Phase.READY)
                 }
                 active.isNotEmpty() -> Text("${active.size}", style = MaterialTheme.typography.titleSmallEmphasized)
             }
@@ -571,11 +627,11 @@ private fun EdgeTab(side: Dock, active: List<Goal>, timer: FocusTimer.State, tou
 private fun Pill(active: List<Goal>, timer: FocusTimer.State, touch: Modifier) {
     val now = rememberNow(active = timer.status == Status.RUNNING, alignTo = timer.endAt)
     val top = active.firstOrNull()
-    val ringing = timer.status == Status.RINGING
+    val warm = timer.status == Status.RINGING || timer.phase == FocusTimer.Phase.READY
     Surface(
         shape = RoundedCornerShape(50),
-        color = if (ringing) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer,
-        contentColor = if (ringing) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
+        color = if (warm) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer,
+        contentColor = if (warm) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
         shadowElevation = 6.dp,
         modifier = touch,
     ) {
@@ -586,12 +642,13 @@ private fun Pill(active: List<Goal>, timer: FocusTimer.State, touch: Modifier) {
             when {
                 timer.isActive -> {
                     val fraction = if (timer.totalMs > 0) timer.remaining(now).toFloat() / timer.totalMs else 0f
-                    TimerDisc(fraction, Modifier.size(24.dp))
+                    TimerDisc(fraction, Modifier.size(24.dp), ready = timer.phase == FocusTimer.Phase.READY)
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        when (timer.status) {
-                            Status.RINGING -> "Time's up"
-                            Status.PAUSED -> "⏸ " + formatDuration(timer.remaining(now))
+                        when {
+                            timer.isReadyRinging -> "Time to start"
+                            timer.status == Status.RINGING -> "Time's up"
+                            timer.status == Status.PAUSED -> "⏸ " + formatDuration(timer.remaining(now))
                             else -> formatDuration(timer.remaining(now))
                         },
                         style = MaterialTheme.typography.titleSmallEmphasized,
@@ -644,6 +701,7 @@ private fun ExpandedList(
     active: List<Goal>,
     timer: FocusTimer.State,
     drag: Modifier,
+    onFocus: (Goal) -> Unit,
     onAdd: (QuickAddActivity.Kind) -> Unit,
     onOpenApp: () -> Unit,
     onTuck: () -> Unit,
@@ -667,38 +725,64 @@ private fun ExpandedList(
             }
 
             if (timer.isActive) {
+                val readyPhase = timer.phase == FocusTimer.Phase.READY
                 Surface(
                     shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer,
+                    color = if (readyPhase) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = if (readyPhase) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
                     modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                 ) {
-                    Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        val now = rememberNow(active = timer.status == Status.RUNNING, alignTo = timer.endAt)
-                        val fraction = if (timer.totalMs > 0) timer.remaining(now).toFloat() / timer.totalMs else 0f
-                        TimerDisc(fraction, Modifier.size(28.dp), ready = timer.isGettingReady)
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            if (timer.status == Status.RINGING) "Time's up" else formatDuration(timer.remaining(now)),
-                            style = MaterialTheme.typography.titleMediumEmphasized,
-                            modifier = Modifier.weight(1f),
-                        )
-                        // The same buttons as the timer card in the app.
-                        when {
-                            timer.status == Status.RINGING -> {
-                                TextButton(onClick = { FocusTimer.addMinutes(5) }, shapes = ButtonDefaults.shapes()) { Text("+5") }
-                                TextButton(onClick = { FocusTimer.stop() }, shapes = ButtonDefaults.shapes()) { Text("Done") }
+                    Column(Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            val now = rememberNow(active = timer.status == Status.RUNNING, alignTo = timer.endAt)
+                            val fraction = if (timer.totalMs > 0) timer.remaining(now).toFloat() / timer.totalMs else 0f
+                            TimerDisc(fraction, Modifier.size(28.dp), ready = readyPhase)
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                when {
+                                    timer.isReadyRinging -> "Time to start!"
+                                    timer.status == Status.RINGING -> "Time's up"
+                                    else -> formatDuration(timer.remaining(now))
+                                },
+                                style = MaterialTheme.typography.titleMediumEmphasized,
+                                modifier = Modifier.weight(1f),
+                            )
+                            val compact = PaddingValues(horizontal = 8.dp)
+                            when {
+                                timer.isReadyRinging -> Unit
+                                timer.status == Status.RINGING -> {
+                                    TextButton(onClick = { FocusTimer.addMinutes(5) }, contentPadding = compact, shapes = ButtonDefaults.shapes()) { Text("+5") }
+                                    TextButton(onClick = { FocusTimer.stop() }, contentPadding = compact, shapes = ButtonDefaults.shapes()) { Text("Done") }
+                                }
+                                timer.isGettingReady -> Unit
+                                timer.status == Status.PAUSED -> {
+                                    TextButton(onClick = { FocusTimer.addMinutes(5) }, contentPadding = compact, shapes = ButtonDefaults.shapes()) { Text("+5") }
+                                    IconButton(onClick = { FocusTimer.resume() }, shapes = IconButtonDefaults.shapes()) {
+                                        Icon(painterResource(R.drawable.ic_play), contentDescription = "Resume")
+                                    }
+                                }
+                                else -> {
+                                    TextButton(onClick = { FocusTimer.addMinutes(5) }, contentPadding = compact, shapes = ButtonDefaults.shapes()) { Text("+5") }
+                                    IconButton(onClick = { FocusTimer.pause() }, shapes = IconButtonDefaults.shapes()) {
+                                        Icon(painterResource(R.drawable.ic_pause), contentDescription = "Pause")
+                                    }
+                                }
                             }
-                            timer.isGettingReady -> TextButton(onClick = { FocusTimer.startNow() }, shapes = ButtonDefaults.shapes()) { Text("Start now") }
-                            timer.status == Status.PAUSED -> IconButton(onClick = { FocusTimer.resume() }, shapes = IconButtonDefaults.shapes()) {
-                                Icon(painterResource(R.drawable.ic_play), contentDescription = "Resume")
-                            }
-                            else -> IconButton(onClick = { FocusTimer.pause() }, shapes = IconButtonDefaults.shapes()) {
-                                Icon(painterResource(R.drawable.ic_pause), contentDescription = "Pause")
+                            if (timer.status != Status.RINGING || timer.isReadyRinging) {
+                                IconButton(onClick = { FocusTimer.stop() }, shapes = IconButtonDefaults.shapes()) {
+                                    Icon(painterResource(R.drawable.ic_close), contentDescription = "Stop")
+                                }
                             }
                         }
-                        if (timer.status != Status.RINGING) {
-                            IconButton(onClick = { FocusTimer.stop() }, shapes = IconButtonDefaults.shapes()) {
-                                Icon(painterResource(R.drawable.ic_close), contentDescription = "Stop")
+                        if (timer.isGettingReady || timer.isReadyRinging) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(end = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End),
+                            ) {
+                                TextButton(onClick = { FocusTimer.addMinutes(5) }, shapes = ButtonDefaults.shapes()) { Text("+5 min") }
+                                TextButton(onClick = { FocusTimer.startNow() }, shapes = ButtonDefaults.shapes()) {
+                                    Text(if (timer.isReadyRinging) "Start" else "Start now")
+                                }
                             }
                         }
                     }
@@ -727,7 +811,7 @@ private fun ExpandedList(
                                     view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
                                     GoalStore.setDone(goal.id, true)
                                 }
-                                .padding(horizontal = 12.dp, vertical = 12.dp),
+                                .padding(start = 12.dp, end = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(
@@ -737,7 +821,20 @@ private fun ExpandedList(
                                 modifier = Modifier.size(22.dp),
                             )
                             Spacer(Modifier.width(10.dp))
-                            Text(goal.text, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                goal.text,
+                                style = MaterialTheme.typography.bodyLarge,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f).padding(vertical = 12.dp),
+                            )
+                            IconButton(onClick = { onFocus(goal) }, shapes = IconButtonDefaults.shapes()) {
+                                Icon(
+                                    painterResource(R.drawable.ic_play),
+                                    contentDescription = "Focus on this",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
                         }
                     }
                 }

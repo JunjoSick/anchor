@@ -21,8 +21,8 @@ import kotlinx.coroutines.flow.asStateFlow
  * and battery saving, and the countdown on screen is worked out from the end time when drawn.
  *
  * A timer can start with a short "get ready" countdown: a few minutes to wrap up and settle in,
- * after which the focus block starts by itself, so starting is something that happens to you
- * rather than one more decision to make.
+ * after which it rings like an alarm until you tap Start, so starting actually interrupts what
+ * you were doing instead of slipping by unnoticed.
  */
 object FocusTimer {
     enum class Status { IDLE, RUNNING, PAUSED, RINGING }
@@ -47,6 +47,7 @@ object FocusTimer {
     ) {
         val isActive: Boolean get() = status != Status.IDLE
         val isGettingReady: Boolean get() = phase == Phase.READY && (status == Status.RUNNING || status == Status.PAUSED)
+        val isReadyRinging: Boolean get() = phase == Phase.READY && status == Status.RINGING
 
         fun remaining(now: Long = System.currentTimeMillis()): Long = when (status) {
             Status.RUNNING -> (endAt - now).coerceAtLeast(0)
@@ -106,10 +107,10 @@ object FocusTimer {
         TimerNotifications.showRunning(appContext, _state.value)
     }
 
-    /** Skips the rest of the get-ready countdown. */
+    /** Skips the rest of the get-ready countdown, or answers its alarm to begin focusing. */
     fun startNow() {
         val s = _state.value
-        if (!s.isGettingReady) return
+        if (s.phase != Phase.READY || !s.isActive) return
         beginFocus(s, now())
     }
 
@@ -146,7 +147,14 @@ object FocusTimer {
                 set(s.copy(totalMs = s.totalMs + extra, remainingMs = s.remainingMs + extra))
                 TimerNotifications.showRunning(appContext, _state.value)
             }
-            Status.RINGING, Status.IDLE -> start(minutes, s.label, s.goalId)
+            Status.RINGING -> {
+                if (s.phase == Phase.READY) {
+                    startAfter(minutes, (s.focusMs / MINUTE).toInt().coerceAtLeast(1), s.label, s.goalId)
+                } else {
+                    start(minutes, s.label, s.goalId)
+                }
+            }
+            Status.IDLE -> start(minutes, s.label, s.goalId)
         }
     }
 
@@ -162,11 +170,6 @@ object FocusTimer {
         when (action) {
             ACTION_END -> {
                 if (isStaleEnd(s, now())) return
-                if (s.phase == Phase.READY) {
-                    beginFocus(s, now())
-                    TimerNotifications.showCue(appContext, _state.value, "Time to start")
-                    return
-                }
                 set(s.copy(status = Status.RINGING))
                 TimerNotifications.showDone(appContext, _state.value, loud = true)
                 at(ACTION_SILENCE, now() + RING_FOR)
@@ -238,12 +241,11 @@ object FocusTimer {
         State(Status.RUNNING, s.focusMs, at + s.focusMs, 0, s.label, s.goalId, Phase.FOCUS, 0, readyMs = s.totalMs)
 
     /**
-     * The state to carry on from after a reboot. A get-ready countdown that ran out meanwhile
-     * started its focus block then, and a timer that ran out meanwhile is ringing.
+     * The state to carry on from after a reboot. Any timer (focus or get-ready) that ran out
+     * meanwhile is ringing and waiting for the user.
      */
     internal fun afterRestart(s: State, now: Long): State {
         if (s.status != Status.RUNNING || s.endAt > now) return s
-        if (s.phase == Phase.READY) return afterRestart(focusAfterReady(s, s.endAt), now)
         return s.copy(status = Status.RINGING)
     }
 

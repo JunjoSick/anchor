@@ -76,6 +76,7 @@ object TimerNotifications {
             running -> builder.addAction(0, "Pause", FocusTimer.broadcast(ctx, FocusTimer.ACTION_PAUSE))
             else -> builder.addAction(0, "Resume", FocusTimer.broadcast(ctx, FocusTimer.ACTION_RESUME))
         }
+        builder.addAction(0, "+5 min", FocusTimer.broadcast(ctx, FocusTimer.ACTION_ADD5))
         builder.addAction(0, "Stop", FocusTimer.broadcast(ctx, FocusTimer.ACTION_STOP))
 
         Notifications.post(ctx, Notifications.ID_TIMER, builder.build())
@@ -106,10 +107,12 @@ object TimerNotifications {
     }
 
     /**
-     * "Time's up". Loud: rings and vibrates on repeat and fills the screen, until Done or +5 min.
-     * Quiet: the same notification without sound, after it has rung for a while or after a reboot.
+     * "Time's up" (or "Time to start!" after a get-ready countdown). Loud: rings and vibrates on
+     * repeat and fills the screen, until answered. Quiet: the same notification without sound,
+     * after it has rung for a while or after a reboot.
      */
     fun showDone(ctx: Context, s: FocusTimer.State, loud: Boolean) {
+        val ready = s.phase == Phase.READY
         val open = PendingIntent.getActivity(
             ctx,
             20,
@@ -118,15 +121,24 @@ object TimerNotifications {
         )
         val builder = NotificationCompat.Builder(ctx, Notifications.CH_DONE)
             .setSmallIcon(R.drawable.ic_timer)
-            .setContentTitle("Time's up")
-            .setContentText(s.label ?: "Your ${minutesText(s.totalMs)} timer finished")
+            .setContentTitle(if (ready) "Time to start!" else "Time's up")
+            .setContentText(
+                if (ready) listOfNotNull(s.label ?: "Focus", minutesText(s.focusMs)).joinToString(" · ")
+                else s.label ?: "Your ${minutesText(s.totalMs)} timer finished",
+            )
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(true)
             .setContentIntent(open)
-            .addAction(0, "Done", FocusTimer.broadcast(ctx, FocusTimer.ACTION_STOP))
-            .addAction(0, "+5 min", FocusTimer.broadcast(ctx, FocusTimer.ACTION_ADD5))
+        if (ready) {
+            builder.addAction(0, "Start", FocusTimer.broadcast(ctx, FocusTimer.ACTION_START_NOW))
+                .addAction(0, "+5 min", FocusTimer.broadcast(ctx, FocusTimer.ACTION_ADD5))
+                .addAction(0, "Stop", FocusTimer.broadcast(ctx, FocusTimer.ACTION_STOP))
+        } else {
+            builder.addAction(0, "Done", FocusTimer.broadcast(ctx, FocusTimer.ACTION_STOP))
+                .addAction(0, "+5 min", FocusTimer.broadcast(ctx, FocusTimer.ACTION_ADD5))
+        }
         if (loud) builder.setFullScreenIntent(open, true)
         else builder.setSilent(true).setOnlyAlertOnce(true)
 

@@ -52,21 +52,23 @@ fun TimerCard(state: FocusTimer.State, modifier: Modifier = Modifier) {
     val now = rememberNow(active = state.status == Status.RUNNING, alignTo = state.endAt)
     val remaining = state.remaining(now)
     val fraction = if (state.totalMs > 0) remaining.toFloat() / state.totalMs else 0f
+    val readyPhase = state.phase == FocusTimer.Phase.READY
     val ready = state.isGettingReady
     val ringing = state.status == Status.RINGING
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
-        color = if (ready) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer,
-        contentColor = if (ready) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
+        color = if (readyPhase) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer,
+        contentColor = if (readyPhase) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
     ) {
         Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TimerDisc(fraction, Modifier.size(48.dp), ready = ready)
+                TimerDisc(fraction, Modifier.size(48.dp), ready = readyPhase)
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
                         when {
+                            state.isReadyRinging -> "Time to start!"
                             ringing -> "Time's up"
                             ready -> "Starts in ${formatDuration(remaining)}"
                             else -> formatDuration(remaining)
@@ -76,6 +78,7 @@ fun TimerCard(state: FocusTimer.State, modifier: Modifier = Modifier) {
                     )
                     Text(
                         when {
+                            state.isReadyRinging -> listOfNotNull(state.label, "${minutesText(state.focusMs)} focus").joinToString(" · ")
                             ringing -> state.label ?: "${minutesText(state.totalMs)} done"
                             ready -> listOfNotNull(state.label, "${minutesText(state.focusMs)} focus").joinToString(" · ")
                             state.status == Status.PAUSED -> listOfNotNull("Paused", state.label).joinToString(" · ")
@@ -88,13 +91,18 @@ fun TimerCard(state: FocusTimer.State, modifier: Modifier = Modifier) {
                     )
                 }
                 when {
-                    ringing -> Unit
-                    ready -> TextButton(onClick = { FocusTimer.startNow() }, shapes = ButtonDefaults.shapes()) { Text("Start now") }
-                    state.status == Status.PAUSED -> IconButton(onClick = { FocusTimer.resume() }, shapes = IconButtonDefaults.shapes()) {
-                        Icon(painterResource(R.drawable.ic_play), contentDescription = "Resume")
+                    ringing || ready -> Unit
+                    state.status == Status.PAUSED -> {
+                        TextButton(onClick = { FocusTimer.addMinutes(5) }, shapes = ButtonDefaults.shapes()) { Text("+5") }
+                        IconButton(onClick = { FocusTimer.resume() }, shapes = IconButtonDefaults.shapes()) {
+                            Icon(painterResource(R.drawable.ic_play), contentDescription = "Resume")
+                        }
                     }
-                    else -> IconButton(onClick = { FocusTimer.pause() }, shapes = IconButtonDefaults.shapes()) {
-                        Icon(painterResource(R.drawable.ic_pause), contentDescription = "Pause")
+                    else -> {
+                        TextButton(onClick = { FocusTimer.addMinutes(5) }, shapes = ButtonDefaults.shapes()) { Text("+5") }
+                        IconButton(onClick = { FocusTimer.pause() }, shapes = IconButtonDefaults.shapes()) {
+                            Icon(painterResource(R.drawable.ic_pause), contentDescription = "Pause")
+                        }
                     }
                 }
                 if (!ringing) {
@@ -103,7 +111,24 @@ fun TimerCard(state: FocusTimer.State, modifier: Modifier = Modifier) {
                     }
                 }
             }
-            if (ringing) {
+            if (ready) {
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 8.dp, end = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                ) {
+                    OutlinedButton(onClick = { FocusTimer.addMinutes(5) }, shapes = ButtonDefaults.shapes()) { Text("+5 min") }
+                    Button(onClick = { FocusTimer.startNow() }, shapes = ButtonDefaults.shapes()) { Text("Start now") }
+                }
+            } else if (state.isReadyRinging) {
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 8.dp, end = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                ) {
+                    TextButton(onClick = { FocusTimer.stop() }, shapes = ButtonDefaults.shapes()) { Text("Cancel") }
+                    OutlinedButton(onClick = { FocusTimer.addMinutes(5) }, shapes = ButtonDefaults.shapes()) { Text("+5 min") }
+                    Button(onClick = { FocusTimer.startNow() }, shapes = ButtonDefaults.shapes()) { Text("Start") }
+                }
+            } else if (ringing) {
                 Row(
                     Modifier.fillMaxWidth().padding(top = 8.dp, end = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
