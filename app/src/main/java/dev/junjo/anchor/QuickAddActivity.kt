@@ -24,17 +24,24 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -169,13 +176,15 @@ class QuickAddActivity : ComponentActivity() {
                 Kind.REMIND -> ACTION_REMIND
                 Kind.FOCUS -> ACTION_FOCUS
             }
-            ctx.startActivity(
-                Intent(ctx, QuickAddActivity::class.java)
-                    .setAction(action)
-                    .apply { if (text != null) putExtra(EXTRA_TEXT, text) }
-                    .apply { if (goalId != null) putExtra(EXTRA_GOAL, goalId) }
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
+            runCatching {
+                ctx.startActivity(
+                    Intent(ctx, QuickAddActivity::class.java)
+                        .setAction(action)
+                        .apply { if (text != null) putExtra(EXTRA_TEXT, text) }
+                        .apply { if (goalId != null) putExtra(EXTRA_GOAL, goalId) }
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
         }
     }
 }
@@ -192,6 +201,7 @@ private fun Sheet(onClose: () -> Unit, content: @Composable ColumnScope.() -> Un
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.35f))
             .clickable(interactionSource = noRipple, indication = null, onClick = onClose)
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
             .imePadding(),
         contentAlignment = Alignment.BottomCenter,
     ) {
@@ -203,7 +213,13 @@ private fun Sheet(onClose: () -> Unit, content: @Composable ColumnScope.() -> Un
                 // Taps on the sheet itself must not fall through and close it.
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {},
         ) {
-            Column(Modifier.navigationBarsPadding().padding(16.dp), content = content)
+            Column(
+                Modifier
+                    .verticalScroll(rememberScrollState())
+                    .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
+                    .padding(16.dp),
+                content = content,
+            )
         }
     }
 }
@@ -350,17 +366,16 @@ private fun AddContent(kind: QuickAddActivity.Kind, initialText: String, onClose
             }
         }
         Button(onClick = { if (save()) onClose() }, enabled = text.isNotBlank(), shapes = ButtonDefaults.shapes(), modifier = Modifier.heightIn(min = 48.dp)) {
-            val target = if (remind) at(now) else 0L
-            val isTomorrow = remind && Instant.ofEpochMilli(target).atZone(ZoneId.systemDefault()).toLocalDate()
-                .isAfter(LocalDate.now(ZoneId.systemDefault()))
-            val whenLabel = if (isTomorrow) "tomorrow ${clockTime(target)}" else "at ${clockTime(target)}"
-            Text(
-                when {
-                    !remind -> "Save"
-                    alarm -> "Ring $whenLabel"
-                    else -> "Remind $whenLabel"
-                },
-            )
+            val label = if (!remind) {
+                "Save"
+            } else {
+                val target = at(now)
+                val isTomorrow = Instant.ofEpochMilli(target).atZone(ZoneId.systemDefault()).toLocalDate()
+                    .isAfter(LocalDate.now(ZoneId.systemDefault()))
+                val whenLabel = if (isTomorrow) "tomorrow ${clockTime(target)}" else "at ${clockTime(target)}"
+                if (alarm) "Ring $whenLabel" else "Remind $whenLabel"
+            }
+            Text(label)
         }
     }
 }

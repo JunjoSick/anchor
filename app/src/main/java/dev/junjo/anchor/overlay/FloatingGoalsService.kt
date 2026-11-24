@@ -25,6 +25,7 @@ import android.os.IBinder
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.Choreographer
 import android.view.animation.AccelerateInterpolator
@@ -41,11 +42,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
@@ -76,6 +80,7 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ServiceCompat
 import androidx.lifecycle.Lifecycle
@@ -126,6 +131,7 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
 
     private var expanded by mutableStateOf(false)
     private var dock by mutableStateOf(Dock.NONE)
+    private var maxListHeight by mutableStateOf(480.dp)
     private var dragging = false
     private var animator: ValueAnimator? = null
 
@@ -225,12 +231,13 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        updateMaxListHeight()
         if (view == null) return
         animator?.cancel()
         unfreezeSize()
         val w = width()
         val h = height()
-        params.y = params.y.coerceIn(0, (screenHeight() - h).coerceAtLeast(0))
+        params.y = clampY(params.y, h)
         params.x = if (dock != Dock.NONE) 0 else params.x.coerceIn(0, (screenWidth() - w).coerceAtLeast(0))
         applyNow()
         save()
@@ -238,6 +245,7 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
 
     @SuppressLint("ClickableViewAccessibility")
     private fun addBubble() {
+        updateMaxListHeight()
         val (x, y) = FloatingGoals.position(this)
         dock = FloatingGoals.dock(this)
         anchorRight = when (dock) {
@@ -258,7 +266,7 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
         ).apply {
             gravity = Gravity.TOP or (if (anchorRight) Gravity.RIGHT else Gravity.LEFT)
             this.x = if (dock != Dock.NONE) 0 else x.coerceAtLeast(0)
-            this.y = y.coerceIn(0, (screenHeight() - dp(76f).toInt()).coerceAtLeast(0))
+            this.y = clampY(y, dp(76f).toInt())
         }
 
         val compose = ComposeView(this).apply {
@@ -280,9 +288,9 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
                     return@addOnLayoutChangeListener
                 }
                 if (dragging || revealPending || animator?.isRunning == true) return@addOnLayoutChangeListener
-                // Keep it fully on screen after a size or screen-orientation change (e.g. the list opening).
+                // Keep it fully on screen (and clear of system bars) after a size or orientation change.
                 val targetX = if (dock != Dock.NONE) 0 else params.x.coerceIn(0, (screenWidth() - w).coerceAtLeast(0))
-                val targetY = params.y.coerceIn(0, (screenHeight() - h).coerceAtLeast(0))
+                val targetY = clampY(params.y, h)
                 if (targetX != params.x || targetY != params.y) {
                     params.x = targetX
                     params.y = targetY
@@ -301,6 +309,7 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
                     Bubble(
                         expanded = expanded,
                         dock = dock,
+                        maxListHeight = maxListHeight,
                         onExpand = ::showList,
                         gestures = BubbleGestures(::dragStart, ::dragMove, ::dragEnd),
                         onUntuck = ::untuck,
@@ -328,6 +337,24 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
 
     private fun screenWidth() = windowManager.currentWindowMetrics.bounds.width()
     private fun screenHeight() = windowManager.currentWindowMetrics.bounds.height()
+
+    private fun safeInsets() = windowManager.currentWindowMetrics.windowInsets
+        .getInsetsIgnoringVisibility(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+
+    /** Keeps the bubble clear of the status bar and bottom gesture bar, especially in landscape. */
+    private fun clampY(y: Int, h: Int): Int {
+        val insets = safeInsets()
+        val minY = insets.top
+        val maxY = (screenHeight() - insets.bottom - h).coerceAtLeast(minY)
+        return y.coerceIn(minY, maxY)
+    }
+
+    private fun updateMaxListHeight() {
+        val insets = safeInsets()
+        val usablePx = (screenHeight() - insets.top - insets.bottom).coerceAtLeast(0)
+        // Leave room for the overlay's outer shadow padding so the bottom buttons stay off the gesture bar.
+        maxListHeight = ((usablePx / resources.displayMetrics.density) - 24f).coerceAtLeast(180f).dp
+    }
 
     private var startLeft = 0
     private var startY = 0
@@ -397,7 +424,7 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
     private fun dragMove(dx: Float, dy: Float) {
         val v = view ?: return
         val w = width()
-        params.y = (startY + dy.toInt()).coerceIn(0, (screenHeight() - height()).coerceAtLeast(0))
+        params.y = clampY(startY + dy.toInt(), height())
         if (dock == Dock.NONE) {
             // Up to 70% may go past an edge while dragging; letting go there tucks it away.
             setLeftX((startLeft + dx.toInt()).coerceIn(-(w * 0.7f).toInt(), screenWidth() - (w * 0.3f).toInt()))
@@ -527,6 +554,7 @@ private const val TUCK_NUDGE_INTERVAL_MS = 3 * 60_000L
 private fun Bubble(
     expanded: Boolean,
     dock: Dock,
+    maxListHeight: Dp,
     onExpand: (Boolean) -> Unit,
     gestures: BubbleGestures,
     onUntuck: () -> Unit,
@@ -546,7 +574,7 @@ private fun Bubble(
         dock != Dock.NONE -> EdgeTab(dock, active, timer, nudge, Modifier.bubbleDrag(gestures, onTap = onUntuck))
         // Padding leaves room for the shadow inside the overlay window.
         expanded -> Box(Modifier.padding(8.dp)) {
-            ExpandedList(active, timer, Modifier.bubbleDrag(gestures), onFocus, onAdd, onOpenApp, onTuck)
+            ExpandedList(active, timer, maxListHeight, Modifier.bubbleDrag(gestures), onFocus, onAdd, onOpenApp, onTuck)
         }
         else -> Box(Modifier.padding(8.dp)) {
             Pill(
@@ -700,6 +728,7 @@ private fun Pill(active: List<Goal>, timer: FocusTimer.State, touch: Modifier) {
 private fun ExpandedList(
     active: List<Goal>,
     timer: FocusTimer.State,
+    maxHeight: Dp,
     drag: Modifier,
     onFocus: (Goal) -> Unit,
     onAdd: (QuickAddActivity.Kind) -> Unit,
@@ -711,7 +740,7 @@ private fun ExpandedList(
         shape = RoundedCornerShape(28.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         shadowElevation = 8.dp,
-        modifier = Modifier.width(300.dp),
+        modifier = Modifier.width(300.dp).heightIn(max = maxHeight),
     ) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             // The title is the drag handle, so the list and buttons stay easy to tap.
@@ -724,6 +753,9 @@ private fun ExpandedList(
                 TextButton(onClick = onTuck, shapes = ButtonDefaults.shapes()) { Text("Tuck away") }
             }
 
+            // Middle content scrolls when the viewport is short (e.g. landscape), keeping the
+            // drag handle above and the Goal / Note / Open actions below always reachable.
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
             if (timer.isActive) {
                 val readyPhase = timer.phase == FocusTimer.Phase.READY
                 Surface(
@@ -797,11 +829,10 @@ private fun ExpandedList(
                     modifier = Modifier.padding(8.dp),
                 )
             }
-            val shown = active.take(6)
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                shown.forEachIndexed { i, goal ->
+                active.forEachIndexed { i, goal ->
                     Surface(
-                        shape = segmentShape(i, shown.size),
+                        shape = segmentShape(i, active.size),
                         color = MaterialTheme.colorScheme.surfaceContainerLowest,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
@@ -839,13 +870,6 @@ private fun ExpandedList(
                     }
                 }
             }
-            if (active.size > shown.size) {
-                Text(
-                    "+${active.size - shown.size} more in the app",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 8.dp, top = 6.dp),
-                )
             }
 
             Spacer(Modifier.height(8.dp))
