@@ -100,6 +100,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import dev.junjo.anchor.QuickAddTileService
 import dev.junjo.anchor.NoteTileService
+import dev.junjo.anchor.TripTileService
 import dev.junjo.anchor.R
 import dev.junjo.anchor.data.Backup
 import dev.junjo.anchor.data.Goal
@@ -443,6 +444,11 @@ private fun AddMenu() {
             onClick = { pick(QuickAddActivity.Kind.FOCUS) },
             icon = { Icon(painterResource(R.drawable.ic_timer), contentDescription = null) },
             text = { Text("Focus") },
+        )
+        FloatingActionButtonMenuItem(
+            onClick = { pick(QuickAddActivity.Kind.TRIP) },
+            icon = { Icon(painterResource(R.drawable.ic_trip), contentDescription = null) },
+            text = { Text("In&Out") },
         )
     }
 }
@@ -796,6 +802,9 @@ private fun SettingsSection(refresh: Int, onShowSetup: () -> Unit, onMessage: (S
             }
             TextButton(onClick = { requestTile(ctx, NoteTileService::class.java, R.string.note_tile_label, R.drawable.ic_note) }, shapes = ButtonDefaults.shapes()) {
                 Text("Add an “Add note” button to Quick Settings")
+            }
+            TextButton(onClick = { requestTile(ctx, TripTileService::class.java, R.string.trip_tile_label, R.drawable.ic_trip) }, shapes = ButtonDefaults.shapes()) {
+                Text("Add an “In&Out” button to Quick Settings")
             }
         }
         if (AppPrefs.setupHidden(ctx)) {

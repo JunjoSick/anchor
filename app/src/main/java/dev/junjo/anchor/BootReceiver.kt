@@ -8,6 +8,7 @@ import dev.junjo.anchor.overlay.FloatingGoals
 import dev.junjo.anchor.reminders.Reminders
 import dev.junjo.anchor.timer.FocusTimer
 import dev.junjo.anchor.timer.TimerNotifications
+import dev.junjo.anchor.trip.Trips
 import dev.junjo.anchor.widget.DayRollover
 import dev.junjo.anchor.widget.Widgets
 
@@ -20,6 +21,7 @@ class BootReceiver : BroadcastReceiver() {
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> {
                 FocusTimer.restore()
+                Trips.catchUp()
                 Reminders.scheduleAll(context)
                 GoalsNotification.update(context)
                 Widgets.refresh(context)

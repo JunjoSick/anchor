@@ -7,5 +7,7 @@
     <string name="shortcut_note">Add note</string>
     <string name="shortcut_remind">Remind me</string>
     <string name="shortcut_focus">Focus</string>
+    <string name="shortcut_trip">In&amp;Out</string>
     <string name="note_tile_label">Add note</string>
+    <string name="trip_tile_label">In&amp;Out</string>
 </resources>

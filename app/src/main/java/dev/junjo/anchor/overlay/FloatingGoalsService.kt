@@ -24,12 +24,16 @@ import android.os.Build
 import android.os.IBinder
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.Choreographer
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
+import android.widget.FrameLayout
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -86,6 +90,7 @@ import androidx.core.app.ServiceCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
@@ -102,10 +107,20 @@ import dev.junjo.anchor.notify.GoalsNotification
 import dev.junjo.anchor.notify.Notifications
 import dev.junjo.anchor.timer.FocusTimer
 import dev.junjo.anchor.timer.FocusTimer.Status
+import dev.junjo.anchor.trip.StopCard
+import dev.junjo.anchor.trip.TripAction
+import dev.junjo.anchor.trip.TripMenu
+import dev.junjo.anchor.trip.TripPill
+import dev.junjo.anchor.trip.TripPolicy
+import dev.junjo.anchor.trip.TripStatus
+import dev.junjo.anchor.trip.Trips
+import dev.junjo.anchor.trip.flashThreeTimes
 import dev.junjo.anchor.ui.AnchorTheme
 import dev.junjo.anchor.ui.TimerDisc
 import dev.junjo.anchor.ui.segmentShape
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
 /**
  * Draws the floating goal bubble over every app.
@@ -128,6 +143,7 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
     private lateinit var windowManager: WindowManager
     private lateinit var params: WindowManager.LayoutParams
     private var view: ComposeView? = null
+    private var stopView: FrameLayout? = null
 
     private var expanded by mutableStateOf(false)
     private var dock by mutableStateOf(Dock.NONE)
@@ -175,6 +191,125 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
             },
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
+        observeTrips()
+    }
+
+    /** Watches active In&Out trips: auto-untucks on start, ticks once a second while screen is on, and shows the STOP card. */
+    private fun observeTrips() {
+        lifecycleScope.launch {
+            var wasTripActive = false
+            Trips.state.collect { trip ->
+                if (trip.isActive && !wasTripActive) {
+                    showList(false)
+                    if (dock != Dock.NONE) {
+                        animator?.cancel()
+                        revealPending = false
+                        view?.alpha = 1f
+                        dock = Dock.NONE
+                        params.x = 0
+                        applyNow()
+                    }
+                }
+                wasTripActive = trip.isActive
+                if (trip.status == TripStatus.STOP) {
+                    showList(false)
+                    showStopCard()
+                } else {
+                    hideStopCard()
+                }
+            }
+        }
+        lifecycleScope.launch {
+            lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                Trips.catchUp()
+                Trips.state.collectLatest { trip ->
+                    if (trip.status != TripStatus.RUNNING) return@collectLatest
+                    while (true) {
+                        val now = System.currentTimeMillis()
+                        when (TripPolicy.tick(trip, now)) {
+                            TripAction.HALFWAY -> {
+                                Trips.markHalfway()
+                                return@collectLatest
+                            }
+                            TripAction.STOP -> {
+                                Trips.reachStop(playCue = true)
+                                return@collectLatest
+                            }
+                            TripAction.LAST_15, TripAction.NONE -> {
+                                val untilNext = ((trip.endAt - now) % 1000L + 1000L) % 1000L
+                                delay(if (untilNext < 20) untilNext + 1000L else untilNext)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun goHome() {
+        runCatching {
+            startActivity(
+                Intent(Intent.ACTION_MAIN)
+                    .addCategory(Intent.CATEGORY_HOME)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
+
+    /** Ends the trip and takes the user to the home screen (started while our overlay is still visible). */
+    private fun finishTripDone() {
+        showList(false)
+        goHome()
+        hideStopCard()
+        Trips.done()
+    }
+
+    private fun showStopCard() {
+        if (stopView != null || !FloatingGoals.canDraw(this)) return
+        val stopParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            // Focusable so Back comes to this window and does nothing until the user picks an action.
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT,
+        )
+        val container = BackBlockingContainer(this).apply {
+            val compose = ComposeView(this@FloatingGoalsService).apply {
+                setViewTreeLifecycleOwner(this@FloatingGoalsService)
+                setViewTreeSavedStateRegistryOwner(this@FloatingGoalsService)
+                setContent {
+                    AnchorTheme {
+                        val trip by Trips.state.collectAsState()
+                        if (trip.status == TripStatus.STOP) {
+                            StopCard(
+                                trip = trip,
+                                onDone = ::finishTripDone,
+                                onAgain = { Trips.again() },
+                                onLater = {
+                                    hideStopCard()
+                                    Trips.later()
+                                },
+                                onFocus = {
+                                    hideStopCard()
+                                    Trips.toFocus()
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+            addView(compose, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        }
+        runCatching {
+            windowManager.addView(container, stopParams)
+            stopView = container
+        }
+    }
+
+    private fun hideStopCard() {
+        stopView?.let { runCatching { windowManager.removeView(it) } }
+        stopView = null
     }
 
     /**
@@ -208,11 +343,13 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
             GoalsNotification.build(this),
             if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0,
         )
-        if (!FloatingGoals.isOn(this)) {
+        if (!FloatingGoals.shouldRun(this)) {
             stopSelf()
             return START_NOT_STICKY
         }
         if (view == null) addBubble()
+        Trips.catchUp()
+        if (Trips.state.value.status == TripStatus.STOP) showStopCard()
         syncLifecycleWithScreen()
         return START_STICKY
     }
@@ -220,6 +357,7 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
     override fun onDestroy() {
         runCatching { unregisterReceiver(screenReceiver) }
         animator?.cancel()
+        hideStopCard()
         lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
         view?.let { runCatching { windowManager.removeView(it) } }
         view = null
@@ -247,7 +385,7 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
     private fun addBubble() {
         updateMaxListHeight()
         val (x, y) = FloatingGoals.position(this)
-        dock = FloatingGoals.dock(this)
+        dock = if (Trips.isActive) Dock.NONE else FloatingGoals.dock(this)
         anchorRight = when (dock) {
             Dock.RIGHT -> true
             Dock.LEFT -> false
@@ -326,6 +464,15 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
                             showList(false)
                             open(Intent(this@FloatingGoalsService, MainActivity::class.java))
                         },
+                        onTripDone = ::finishTripDone,
+                        onTripLater = {
+                            showList(false)
+                            Trips.later()
+                        },
+                        onTripCancel = {
+                            showList(false)
+                            Trips.cancel()
+                        },
                     )
                     }
                 }
@@ -352,8 +499,9 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
     private fun updateMaxListHeight() {
         val insets = safeInsets()
         val usablePx = (screenHeight() - insets.top - insets.bottom).coerceAtLeast(0)
-        // Leave room for the overlay's outer shadow padding so the bottom buttons stay off the gesture bar.
-        maxListHeight = ((usablePx / resources.displayMetrics.density) - 24f).coerceAtLeast(180f).dp
+        // Stay clear of system bars in landscape, and cap height in portrait so the bubble scrolls
+        // smoothly without swallowing the whole screen.
+        maxListHeight = ((usablePx / resources.displayMetrics.density) - 24f).coerceIn(180f, 520f).dp
     }
 
     private var startLeft = 0
@@ -426,8 +574,13 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
         val w = width()
         params.y = clampY(startY + dy.toInt(), height())
         if (dock == Dock.NONE) {
-            // Up to 70% may go past an edge while dragging; letting go there tucks it away.
-            setLeftX((startLeft + dx.toInt()).coerceIn(-(w * 0.7f).toInt(), screenWidth() - (w * 0.3f).toInt()))
+            if (Trips.isActive) {
+                // During an In&Out trip the pill cannot be tucked away: keep it on screen.
+                setLeftX((startLeft + dx.toInt()).coerceIn(0, (screenWidth() - w).coerceAtLeast(0)))
+            } else {
+                // Up to 70% may go past an edge while dragging; letting go there tucks it away.
+                setLeftX((startLeft + dx.toInt()).coerceIn(-(w * 0.7f).toInt(), screenWidth() - (w * 0.3f).toInt()))
+            }
         }
         // A tucked tab only slides up and down its edge; pulling it inward brings the pill out (on release).
         applyNextFrame()
@@ -460,10 +613,10 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
         val left = leftX()
         val centre = left + w / 2
         when {
-            left < -w * 0.25f -> tuck(Dock.LEFT)
-            left + w > sw + w * 0.25f -> tuck(Dock.RIGHT)
-            vx < -fling && centre < sw * 0.6f -> tuck(Dock.LEFT)
-            vx > fling && centre > sw * 0.4f -> tuck(Dock.RIGHT)
+            !Trips.isActive && left < -w * 0.25f -> tuck(Dock.LEFT)
+            !Trips.isActive && left + w > sw + w * 0.25f -> tuck(Dock.RIGHT)
+            !Trips.isActive && vx < -fling && centre < sw * 0.6f -> tuck(Dock.LEFT)
+            !Trips.isActive && vx > fling && centre > sw * 0.4f -> tuck(Dock.RIGHT)
             else -> {
                 // Anchor to the nearer edge, then ease fully back on screen.
                 setAnchor(centre > sw / 2)
@@ -547,6 +700,40 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
     }
 }
 
+/** Overlay root for the STOP card that swallows both Back key events and Android 13+ predictive back. */
+private class BackBlockingContainer(context: Context) : FrameLayout(context) {
+    private val backCallback = if (Build.VERSION.SDK_INT >= 33) {
+        OnBackInvokedCallback { /* Intentionally ignored until user picks an action. */ }
+    } else null
+
+    init {
+        isFocusableInTouchMode = true
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        requestFocus()
+        if (Build.VERSION.SDK_INT >= 33 && backCallback != null) {
+            findOnBackInvokedDispatcher()?.registerOnBackInvokedCallback(
+                OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                backCallback,
+            )
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        if (Build.VERSION.SDK_INT >= 33 && backCallback != null) {
+            findOnBackInvokedDispatcher()?.unregisterOnBackInvokedCallback(backCallback)
+        }
+        super.onDetachedFromWindow()
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) return true
+        return super.dispatchKeyEvent(event)
+    }
+}
+
 /** How often the tucked edge tab pulses red when the nudge setting is on (active screen-on time). */
 private const val TUCK_NUDGE_INTERVAL_MS = 3 * 60_000L
 
@@ -562,15 +749,32 @@ private fun Bubble(
     onFocus: (Goal) -> Unit,
     onAdd: (QuickAddActivity.Kind) -> Unit,
     onOpenApp: () -> Unit,
+    onTripDone: () -> Unit,
+    onTripLater: () -> Unit,
+    onTripCancel: () -> Unit,
 ) {
     val goals by GoalStore.goals.collectAsState()
     val timer by FocusTimer.state.collectAsState()
+    val trip by Trips.state.collectAsState()
+    val tripFlash by Trips.flashSerial.collectAsState()
     val nudge by AppPrefs.bubbleNudgeFlow.collectAsState()
     val active = goals.active()
 
     // Each piece below keeps its own clock (rememberNow), so a tick redraws only the piece that
     // shows the time, and each ticks only as often as what it shows can change.
     when {
+        trip.isActive -> Box(Modifier.padding(8.dp)) {
+            if (expanded) {
+                TripMenu(trip, Modifier.bubbleDrag(gestures), onTripDone, onTripLater, onTripCancel)
+            } else {
+                TripPill(
+                    trip = trip,
+                    flashSerial = tripFlash,
+                    touch = Modifier.bubbleDrag(gestures, onTap = { onExpand(true) }),
+                    onDone = onTripDone,
+                )
+            }
+        }
         dock != Dock.NONE -> EdgeTab(dock, active, timer, nudge, Modifier.bubbleDrag(gestures, onTap = onUntuck))
         // Padding leaves room for the shadow inside the overlay window.
         expanded -> Box(Modifier.padding(8.dp)) {
@@ -607,12 +811,7 @@ private fun EdgeTab(side: Dock, active: List<Goal>, timer: FocusTimer.State, nud
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
                 delay(TUCK_NUDGE_INTERVAL_MS)
-                repeat(3) {
-                    pulse.animateTo(1f, tween(320))
-                    delay(140)
-                    pulse.animateTo(0f, tween(420))
-                    delay(180)
-                }
+                pulse.flashThreeTimes()
             }
         }
     }
@@ -873,20 +1072,41 @@ private fun ExpandedList(
             }
 
             Spacer(Modifier.height(8.dp))
-            // The same two ways in as the app's + menu: a goal to tick off, or a note to keep.
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = { onAdd(QuickAddActivity.Kind.GOAL) }, shapes = ButtonDefaults.shapes()) {
-                    Icon(painterResource(R.drawable.ic_add), contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Goal")
+            val actionPad = PaddingValues(horizontal = 8.dp)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilledTonalButton(
+                    onClick = { onAdd(QuickAddActivity.Kind.GOAL) },
+                    contentPadding = actionPad,
+                    shapes = ButtonDefaults.shapes(),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(painterResource(R.drawable.ic_add), contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Goal", maxLines = 1)
                 }
-                FilledTonalButton(onClick = { onAdd(QuickAddActivity.Kind.NOTE) }, shapes = ButtonDefaults.shapes()) {
-                    Icon(painterResource(R.drawable.ic_note), contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Note")
+                FilledTonalButton(
+                    onClick = { onAdd(QuickAddActivity.Kind.NOTE) },
+                    contentPadding = actionPad,
+                    shapes = ButtonDefaults.shapes(),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(painterResource(R.drawable.ic_note), contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Note", maxLines = 1)
                 }
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = onOpenApp, shapes = ButtonDefaults.shapes()) { Text("Open") }
+                FilledTonalButton(
+                    onClick = { onAdd(QuickAddActivity.Kind.TRIP) },
+                    contentPadding = actionPad,
+                    shapes = ButtonDefaults.shapes(),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(painterResource(R.drawable.ic_trip), contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("In&Out", maxLines = 1)
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onOpenApp, shapes = ButtonDefaults.shapes()) { Text("Open app") }
             }
         }
     }

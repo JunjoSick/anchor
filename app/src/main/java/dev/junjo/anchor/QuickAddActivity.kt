@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -42,8 +44,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -56,6 +60,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.ToggleButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -74,6 +79,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
@@ -82,11 +91,15 @@ import dev.junjo.anchor.data.GoalStore
 import dev.junjo.anchor.data.NoteStore
 import dev.junjo.anchor.data.Reminder
 import dev.junjo.anchor.data.ReminderStore
+import dev.junjo.anchor.overlay.FloatingGoals
 import dev.junjo.anchor.timer.FocusTimer
+import dev.junjo.anchor.trip.TripPolicy
+import dev.junjo.anchor.trip.Trips
 import dev.junjo.anchor.ui.AnchorTheme
 import dev.junjo.anchor.ui.DurationDialog
 import dev.junjo.anchor.ui.RemindWhenDialog
 import dev.junjo.anchor.ui.rememberNow
+import dev.junjo.anchor.ui.shortDuration
 import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.LocalDate
@@ -104,7 +117,7 @@ import java.time.format.FormatStyle
  * line, to tick off), a note (anything, kept), "remind me in…" (a one-off) and focus (a timer).
  */
 class QuickAddActivity : ComponentActivity() {
-    enum class Kind { GOAL, NOTE, REMIND, FOCUS }
+    enum class Kind { GOAL, NOTE, REMIND, FOCUS, TRIP }
 
     /** What the sheet shows; [serial] counts requests, so each one starts with fresh state. */
     private class Request(val kind: Kind, val text: String?, val goalId: String?, val serial: Int)
@@ -123,8 +136,11 @@ class QuickAddActivity : ComponentActivity() {
                 // state into a multi-line note field crashes).
                 key(r.serial) {
                     Sheet(onClose = { finish() }) {
-                        if (r.kind == Kind.FOCUS) FocusContent(label = r.text, goalId = r.goalId, onClose = { finish() })
-                        else AddContent(r.kind, r.text.orEmpty(), onClose = { finish() })
+                        when (r.kind) {
+                            Kind.FOCUS -> FocusContent(label = r.text, goalId = r.goalId, onClose = { finish() })
+                            Kind.TRIP -> TripContent(initialText = r.text.orEmpty(), onClose = { finish() })
+                            else -> AddContent(r.kind, r.text.orEmpty(), onClose = { finish() })
+                        }
                     }
                 }
             }
@@ -148,6 +164,7 @@ class QuickAddActivity : ComponentActivity() {
             ACTION_NEW_NOTE -> Kind.NOTE
             ACTION_REMIND -> Kind.REMIND
             ACTION_FOCUS -> Kind.FOCUS
+            ACTION_TRIP -> Kind.TRIP
             else -> Kind.GOAL
         }
         // Focus has nothing to type, so the keyboard stays down; the others open with it up.
@@ -164,6 +181,7 @@ class QuickAddActivity : ComponentActivity() {
         const val ACTION_NEW_NOTE = "dev.junjo.anchor.NEW_NOTE"
         const val ACTION_REMIND = "dev.junjo.anchor.REMIND"
         const val ACTION_FOCUS = "dev.junjo.anchor.FOCUS"
+        const val ACTION_TRIP = "dev.junjo.anchor.TRIP"
         private const val EXTRA_TEXT = "text"
         private const val EXTRA_GOAL = "goal"
         private const val STATE_SERIAL = "serial"
@@ -175,6 +193,7 @@ class QuickAddActivity : ComponentActivity() {
                 Kind.NOTE -> ACTION_NEW_NOTE
                 Kind.REMIND -> ACTION_REMIND
                 Kind.FOCUS -> ACTION_FOCUS
+                Kind.TRIP -> ACTION_TRIP
             }
             runCatching {
                 ctx.startActivity(
@@ -452,5 +471,141 @@ private fun FocusContent(label: String?, goalId: String?, onClose: () -> Unit) {
             }
         }
         Button(onClick = { go(0) }, shapes = ButtonDefaults.shapes()) { Text("Start") }
+    }
+}
+
+/**
+ * In&Out: name a quick errand, pick 1 / 2 / 5 min, Go. Tapping a recent chip starts it in one tap
+ * with its last time.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalLayoutApi::class)
+@Composable
+private fun TripContent(initialText: String, onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    val recent by Trips.recent.collectAsState()
+    val showTip = remember { !Trips.seenTip() }
+    val canOverlay = FloatingGoals.canDraw(ctx)
+    var text by rememberSaveable { mutableStateOf(initialText) }
+    var minutes by rememberSaveable { mutableIntStateOf(Trips.lastMinutes()) }
+    val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(Unit) {
+        focus.requestFocus()
+        delay(150)
+        keyboard?.show()
+    }
+
+    fun start(name: String, mins: Int) {
+        if (!FloatingGoals.canDraw(ctx)) {
+            FloatingGoals.openOverlayPermission(ctx)
+            return
+        }
+        if (Trips.start(name, mins)) onClose()
+    }
+
+    SheetTitle("In&Out")
+    if (showTip) {
+        Text(
+            "Start it, then open the app.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
+        )
+    }
+    TextField(
+        value = text,
+        onValueChange = { text = it },
+        modifier = Modifier.fillMaxWidth().focusRequester(focus),
+        placeholder = { Text("check Marco's stories") },
+        singleLine = true,
+        maxLines = 1,
+        shape = RoundedCornerShape(28.dp),
+        colors = TextFieldDefaults.colors(
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        ),
+        keyboardOptions = KeyboardOptions(
+            capitalization = KeyboardCapitalization.Sentences,
+            imeAction = ImeAction.Done,
+        ),
+        keyboardActions = KeyboardActions(onDone = { start(text, minutes) }),
+    )
+
+    if (recent.isNotEmpty()) {
+        Spacer(Modifier.height(8.dp))
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            recent.forEach { item ->
+                AssistChip(
+                    onClick = { start(item.name, item.minutes) },
+                    label = {
+                        Text(
+                            item.name,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                )
+            }
+        }
+    }
+
+    Spacer(Modifier.height(12.dp))
+    val presets = TripPolicy.PRESET_MINUTES
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween),
+    ) {
+        presets.forEachIndexed { i, m ->
+            ToggleButton(
+                checked = minutes == m,
+                onCheckedChange = { minutes = m },
+                shapes = when (i) {
+                    0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                    presets.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                    else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                },
+                contentPadding = PaddingValues(horizontal = 4.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 48.dp)
+                    .semantics { role = Role.RadioButton; contentDescription = shortDuration(m) },
+            ) {
+                Text(shortDuration(m), maxLines = 1, overflow = TextOverflow.Clip)
+            }
+        }
+    }
+
+    if (!canOverlay) {
+        Text(
+            "Needs “Display over other apps” so the pill and STOP card can show over other apps.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 4.dp, top = 8.dp),
+        )
+    }
+
+    Spacer(Modifier.height(12.dp))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+        if (!canOverlay) {
+            Button(
+                onClick = { FloatingGoals.openOverlayPermission(ctx) },
+                shapes = ButtonDefaults.shapes(),
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) { Text("Allow overlay") }
+        } else {
+            Button(
+                onClick = { start(text, minutes) },
+                enabled = text.isNotBlank(),
+                shapes = ButtonDefaults.shapes(),
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) { Text("Go") }
+        }
     }
 }

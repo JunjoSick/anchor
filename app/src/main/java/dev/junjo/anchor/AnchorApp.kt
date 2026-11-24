@@ -7,6 +7,7 @@ import dev.junjo.anchor.data.ReminderStore
 import dev.junjo.anchor.reminders.Reminders
 import dev.junjo.anchor.notify.Notifications
 import dev.junjo.anchor.timer.FocusTimer
+import dev.junjo.anchor.trip.Trips
 import dev.junjo.anchor.widget.DayRollover
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +23,8 @@ class AnchorApp : Application() {
         GoalStore.init(this)
         FocusTimer.init(this)
         FocusTimer.catchUp()
+        Trips.init(this)
+        Trips.catchUp()
         ReminderStore.init(this)
         NoteStore.init(this)
         // Cheap, and makes sure no reminder is ever left without its alarm.

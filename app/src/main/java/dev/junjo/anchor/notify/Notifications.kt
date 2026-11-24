@@ -23,11 +23,14 @@ object Notifications {
     const val CH_DONE = "timer_done"
     const val CH_REMINDER = "reminders"
     const val CH_REMINDER_ALARM = "reminder_alarms"
+    const val CH_TRIP_HALFWAY = "trip_halfway"
+    const val CH_TRIP_STOP = "trip_stop"
 
     const val ID_GOALS = 1
     const val ID_TIMER = 2
     const val ID_CUE = 3
     const val ID_DONE = 4
+    const val ID_TRIP_ALERT = 5
 
     fun createChannels(ctx: Context) {
         // Goal list and running timer: default importance so they show on the lock screen
@@ -65,6 +68,22 @@ object Notifications {
             }
         val done = ringing(CH_DONE, "Timer finished", "Rings until you tap Done, like an alarm clock")
 
+        val notifSound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        val notifAttrs = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+        // In&Out cues follow the ringer (silent means no sound) and disable channel vibration
+        // because Trips triggers its own short buzz even on silent.
+        fun tripChannel(id: String, name: String, about: String) =
+            NotificationChannel(id, name, NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = about
+                setSound(notifSound, notifAttrs)
+                enableVibration(false)
+                setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
+
         ctx.getSystemService(NotificationManager::class.java).createNotificationChannels(
             listOf(
                 quiet(CH_GOALS, "Goal list", "Your current goals, kept in the shade and on the lock screen"),
@@ -76,6 +95,8 @@ object Notifications {
                     lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                 },
                 ringing(CH_REMINDER_ALARM, "Reminder alarms", "Reminders set to ring like an alarm, until you tap Done or Snooze"),
+                tripChannel(CH_TRIP_HALFWAY, "In&Out halfway", "Short cue halfway through an In&Out trip"),
+                tripChannel(CH_TRIP_STOP, "In&Out time's up", "Cue when an In&Out trip finishes"),
             ),
         )
     }

@@ -35,3 +35,8 @@ open class QuickAddTileService : TileService() {
 class NoteTileService : QuickAddTileService() {
     override val action: String = QuickAddActivity.ACTION_NEW_NOTE
 }
+
+/** An "In&Out" button in Quick Settings. */
+class TripTileService : QuickAddTileService() {
+    override val action: String = QuickAddActivity.ACTION_TRIP
+}

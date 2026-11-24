@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
+import dev.junjo.anchor.trip.Trips
 
 /**
  * The floating goal bubble's on/off switch. It needs Android's "Display over other apps"
@@ -23,21 +24,24 @@ object FloatingGoals {
 
     fun canDraw(ctx: Context) = Settings.canDrawOverlays(ctx)
 
-    /** True when the bubble is switched on and allowed, i.e. actually on screen. */
+    /** True when the user's bubble toggle is on and overlay permission is granted. */
     fun isOn(ctx: Context) = wanted(ctx) && canDraw(ctx)
+
+    /** True while the overlay service should be running: either the bubble is on, or an In&Out trip is active. */
+    fun shouldRun(ctx: Context) = (wanted(ctx) || Trips.isActive) && canDraw(ctx)
+
+    fun openOverlayPermission(ctx: Context) {
+        runCatching {
+            ctx.startActivity(
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
 
     fun enable(ctx: Context) {
         prefs(ctx).edit { putBoolean(ON, true) }
-        if (canDraw(ctx)) {
-            sync(ctx)
-        } else {
-            runCatching {
-                ctx.startActivity(
-                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}"))
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                )
-            }
-        }
+        if (canDraw(ctx)) sync(ctx) else openOverlayPermission(ctx)
     }
 
     fun disable(ctx: Context) {
@@ -45,10 +49,10 @@ object FloatingGoals {
         sync(ctx)
     }
 
-    /** Starts or stops the bubble to match the switch and the permission. */
+    /** Starts or stops the overlay service to match the bubble switch, active trips, and permission. */
     fun sync(ctx: Context) {
         val intent = Intent(ctx, FloatingGoalsService::class.java)
-        if (isOn(ctx)) {
+        if (shouldRun(ctx)) {
             if (!FloatingGoalsService.running) runCatching { ContextCompat.startForegroundService(ctx, intent) }
         } else if (FloatingGoalsService.running) {
             ctx.stopService(intent)

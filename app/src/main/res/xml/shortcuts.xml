@@ -14,6 +14,16 @@
     <shortcut
         android:enabled="true"
         android:icon="@mipmap/ic_launcher"
+        android:shortcutId="trip"
+        android:shortcutShortLabel="@string/shortcut_trip">
+        <intent
+            android:action="dev.junjo.anchor.TRIP"
+            android:targetClass="dev.junjo.anchor.QuickAddActivity"
+            android:targetPackage="dev.junjo.anchor" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
         android:shortcutId="new_note"
         android:shortcutShortLabel="@string/shortcut_note">
         <intent
