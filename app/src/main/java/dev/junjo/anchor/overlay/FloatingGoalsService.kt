@@ -273,11 +273,15 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
             // Focusable so Back comes to this window and does nothing until the user picks an action.
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT,
-        )
+        ).apply {
+            layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
         val container = BackBlockingContainer(this).apply {
+            // Compose's WindowRecomposer resolves lifecycle & saved-state owners from the window's
+            // root view (this container), not from a child ComposeView.
+            setViewTreeLifecycleOwner(this@FloatingGoalsService)
+            setViewTreeSavedStateRegistryOwner(this@FloatingGoalsService)
             val compose = ComposeView(this@FloatingGoalsService).apply {
-                setViewTreeLifecycleOwner(this@FloatingGoalsService)
-                setViewTreeSavedStateRegistryOwner(this@FloatingGoalsService)
                 setContent {
                     AnchorTheme {
                         val trip by Trips.state.collectAsState()
@@ -291,8 +295,9 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
                                     Trips.later()
                                 },
                                 onFocus = {
-                                    hideStopCard()
+                                    // Launch QuickAdd while the overlay window is still visible on Android 14+.
                                     Trips.toFocus()
+                                    hideStopCard()
                                 },
                             )
                         }
@@ -331,6 +336,7 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
     private fun showList(open: Boolean) {
         if (expanded == open) return
         expanded = open
+        if (!::params.isInitialized) return
         val watch = WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
         params.flags = if (open) params.flags or watch else params.flags and watch.inv()
         applyNow()
@@ -546,7 +552,7 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
 
     private fun applyNow() {
         val v = view ?: return
-        if (v.isAttachedToWindow) windowManager.updateViewLayout(v, params)
+        if (::params.isInitialized && v.isAttachedToWindow) windowManager.updateViewLayout(v, params)
     }
 
     /** Moves the window at most once per screen refresh, however many touch events arrive. */

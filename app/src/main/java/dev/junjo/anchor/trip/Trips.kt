@@ -145,8 +145,8 @@ object Trips {
     /** Ends the trip and opens Focus's sheet prefilled with the trip's name. */
     fun toFocus() {
         val name = _state.value.name.takeIf { it.isNotBlank() }
-        done()
         QuickAddActivity.open(appContext, QuickAddActivity.Kind.FOCUS, text = name)
+        done()
     }
 
     /** If a running trip passed its end while the screen was off or after a restart, show STOP. */
