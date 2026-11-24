@@ -158,7 +158,13 @@ object Reminders {
             schedule(ctx, r) // The next one.
             if (r.addAsGoal) {
                 val existing = GoalStore.goals.value.active().firstOrNull { it.text.equals(r.text, ignoreCase = true) }
-                goal = existing?.id ?: GoalStore.add(r.text)?.id
+                // Push reminder goals to the top so they surface on the bubble pill and notification immediately.
+                goal = if (existing != null) {
+                    GoalStore.putFirst(existing.id)
+                    existing.id
+                } else {
+                    GoalStore.add(r.text, putFirst = true)?.id
+                }
             }
         }
         // The goal may have been ticked off during a snooze; then there is nothing left to remind.

@@ -44,12 +44,19 @@ object GoalStore {
         _goals.value = prune(read())
     }
 
-    /** Adds a goal for today. Returns null if the text was blank. */
-    fun add(text: String): Goal? {
+    /** Adds a goal for today. Returns null if the text was blank. With [putFirst], pins it to the top. */
+    fun add(text: String, putFirst: Boolean = false): Goal? {
         val clean = text.trim().replace(Regex("\\s+"), " ")
         if (clean.isEmpty()) return null
         val now = System.currentTimeMillis()
-        val goal = Goal(UUID.randomUUID().toString(), clean, today(), now, now)
+        val goal = Goal(
+            UUID.randomUUID().toString(),
+            clean,
+            today(),
+            now,
+            now,
+            pinnedAt = if (putFirst) now else null,
+        )
         update { it + goal }
         return goal
     }
