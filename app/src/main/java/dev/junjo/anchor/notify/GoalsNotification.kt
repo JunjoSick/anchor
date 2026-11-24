@@ -8,7 +8,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
 import dev.junjo.anchor.AppPrefs
 import dev.junjo.anchor.R
-import dev.junjo.anchor.data.GoalStore
+import dev.junjo.anchor.data.TodoStore
 import dev.junjo.anchor.data.active
 import dev.junjo.anchor.overlay.FloatingGoalsService
 
@@ -33,7 +33,7 @@ object GoalsNotification {
     }
 
     fun build(ctx: Context): Notification {
-        val active = GoalStore.goals.value.active()
+        val active = TodoStore.todos.value.active()
 
         val builder = NotificationCompat.Builder(ctx, Notifications.CH_GOALS)
             .setSmallIcon(R.drawable.ic_check_circle)

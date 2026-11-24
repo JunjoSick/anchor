@@ -5,11 +5,11 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 class BackupTest {
-    @Test fun roundTripPreservesGoalsNotesAndReminders() {
+    @Test fun roundTripPreservesTodosNotesAndReminders() {
         val snapshot = Backup.Snapshot(
-            goals = listOf(
-                Goal("g1", "Reply to Sam", "2026-11-22", createdAt = 10, updatedAt = 20, pinnedAt = 15, reminderId = "r1", firedAt = 18),
-                Goal("g2", "Done thing", "2026-11-22", createdAt = 5, updatedAt = 30, doneAt = 30),
+            todos = listOf(
+                Todo("g1", "Reply to Sam", "2026-11-22", createdAt = 10, updatedAt = 20, pinnedAt = 15, reminderId = "r1", firedAt = 18),
+                Todo("g2", "Done thing", "2026-11-22", createdAt = 5, updatedAt = 30, doneAt = 30),
             ),
             notes = listOf(
                 Note("n1", "Line 1\nLine 2", createdAt = 1, updatedAt = 2),
@@ -37,25 +37,25 @@ class BackupTest {
             }
         """.trimIndent()
         val snap = Backup.fromJson(legacy)
-        assertEquals(1, snap.goals.size)
-        assertEquals("Buy milk", snap.goals[0].text)
-        assertEquals(null, snap.goals[0].reminderId)
-        assertEquals(null, snap.goals[0].firedAt)
+        assertEquals(1, snap.todos.size)
+        assertEquals("Buy milk", snap.todos[0].text)
+        assertEquals(null, snap.todos[0].reminderId)
+        assertEquals(null, snap.todos[0].firedAt)
         assertEquals(1, snap.notes.size)
         assertEquals(1, snap.reminders.size)
     }
 
     @Test fun mergeKeepsNewerCopyAndAddsMissing() {
         val existing = listOf(
-            Goal("a", "Old local", "2026-11-22", createdAt = 1, updatedAt = 10),
-            Goal("b", "Newer local", "2026-11-22", createdAt = 2, updatedAt = 50),
+            Todo("a", "Old local", "2026-11-22", createdAt = 1, updatedAt = 10),
+            Todo("b", "Newer local", "2026-11-22", createdAt = 2, updatedAt = 50),
         )
         val incoming = listOf(
-            Goal("a", "Newer backup", "2026-11-22", createdAt = 1, updatedAt = 40),
-            Goal("b", "Older backup", "2026-11-22", createdAt = 2, updatedAt = 20),
-            Goal("c", "Only in backup", "2026-11-22", createdAt = 3, updatedAt = 30),
+            Todo("a", "Newer backup", "2026-11-22", createdAt = 1, updatedAt = 40),
+            Todo("b", "Older backup", "2026-11-22", createdAt = 2, updatedAt = 20),
+            Todo("c", "Only in backup", "2026-11-22", createdAt = 3, updatedAt = 30),
         )
-        val merged = Backup.mergeById(existing, incoming, Goal::id, Goal::updatedAt)
+        val merged = Backup.mergeById(existing, incoming, Todo::id, Todo::updatedAt)
         assertEquals(listOf("Newer backup", "Newer local", "Only in backup"), merged.map { it.text })
     }
 

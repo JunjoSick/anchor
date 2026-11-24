@@ -86,11 +86,11 @@ import dev.junjo.anchor.QuickAddActivity
 import dev.junjo.anchor.R
 import dev.junjo.anchor.clockTime
 import dev.junjo.anchor.data.Checklist
-import dev.junjo.anchor.data.Goal
-import dev.junjo.anchor.data.GoalStore
 import dev.junjo.anchor.data.NoteStore
 import dev.junjo.anchor.data.Reminder
 import dev.junjo.anchor.data.ReminderStore
+import dev.junjo.anchor.data.Todo
+import dev.junjo.anchor.data.TodoStore
 import dev.junjo.anchor.data.active
 import dev.junjo.anchor.data.doneToday
 import dev.junjo.anchor.data.sinceLabel
@@ -122,13 +122,13 @@ private val DONE_MESSAGES = listOf("Done ✓", "Nice, that's done", "Ticked off 
 fun HomeScreen(onOpenReminders: () -> Unit = {}, onOpenNotes: () -> Unit = {}) {
     val ctx = LocalContext.current
     val view = LocalView.current
-    val goals by GoalStore.goals.collectAsStateWithLifecycle()
+    val todos by TodoStore.todos.collectAsStateWithLifecycle()
     val allNotes by NoteStore.notes.collectAsStateWithLifecycle()
     val allReminders by ReminderStore.reminders.collectAsStateWithLifecycle()
     val timer by FocusTimer.state.collectAsStateWithLifecycle()
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
-    var editingGoalId by rememberSaveable { mutableStateOf<String?>(null) }
-    var remindGoalId by rememberSaveable { mutableStateOf<String?>(null) }
+    var editingTodoId by rememberSaveable { mutableStateOf<String?>(null) }
+    var remindTodoId by rememberSaveable { mutableStateOf<String?>(null) }
     var editingNoteId by rememberSaveable { mutableStateOf<String?>(null) }
     var editingReminderId by rememberSaveable { mutableStateOf<String?>(null) }
     var showDone by rememberSaveable { mutableStateOf(false) }
@@ -165,24 +165,24 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}, onOpenNotes: () -> Unit = {}) {
         }
     }
 
-    fun complete(goal: Goal) {
+    fun complete(todo: Todo) {
         view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-        GoalStore.setDone(goal.id, true)
-        offerUndo(DONE_MESSAGES.random()) { GoalStore.setDone(goal.id, false) }
+        TodoStore.setDone(todo.id, true)
+        offerUndo(DONE_MESSAGES.random()) { TodoStore.setDone(todo.id, false) }
     }
 
-    fun remove(goal: Goal) {
-        GoalStore.delete(goal.id)
-        offerUndo("Deleted") { GoalStore.restore(goal.id) }
+    fun remove(todo: Todo) {
+        TodoStore.delete(todo.id)
+        offerUndo("Deleted") { TodoStore.restore(todo.id) }
     }
 
     // Derived lists are rebuilt only when the data behind them changes, not on every redraw.
-    val active = remember(goals) { goals.active() }
+    val active = remember(todos) { todos.active() }
     val stale = remember(active, resumes) { active.stale() }
     val staleIds = remember(stale) { stale.map { it.id }.toSet() }
     val current = remember(active, staleIds) { active.filterNot { it.id in staleIds } }
     val comingUp = remember(allReminders, resumes) { ReminderStore.comingUp(allReminders) }
-    val done = remember(goals, today) { goals.doneToday() }
+    val done = remember(todos, today) { todos.doneToday() }
     val notes = remember(allNotes) { allNotes.visible() }
     val shownNotes = remember(notes) { notes.take(HOME_NOTES_LIMIT) }
 
@@ -219,7 +219,7 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}, onOpenNotes: () -> Unit = {}) {
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { QuickAddActivity.open(ctx, QuickAddActivity.Kind.GOAL) }) {
+            FloatingActionButton(onClick = { QuickAddActivity.open(ctx, QuickAddActivity.Kind.TODO) }) {
                 Icon(painterResource(R.drawable.ic_add), contentDescription = "Add")
             }
         },
@@ -256,9 +256,9 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}, onOpenNotes: () -> Unit = {}) {
                     StillOnCard(
                         stale,
                         modifier = Modifier.animateItem().padding(bottom = 16.dp),
-                        onKeep = { GoalStore.keep(it.id) },
+                        onKeep = { TodoStore.keep(it.id) },
                         onDrop = { remove(it) },
-                        onKeepAll = { GoalStore.keepAll() },
+                        onKeepAll = { TodoStore.keepAll() },
                     )
                 }
             }
@@ -267,17 +267,17 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}, onOpenNotes: () -> Unit = {}) {
                 item(key = "empty") { EmptyState(Modifier.animateItem()) }
             }
 
-            itemsIndexed(current, key = { _, g -> g.id }) { i, goal ->
-                GoalRow(
-                    goal,
+            itemsIndexed(current, key = { _, t -> t.id }) { i, todo ->
+                TodoRow(
+                    todo,
                     refresh = resumes,
                     shape = segmentShape(i, current.size),
                     modifier = Modifier.animateItem(),
-                    onDone = { complete(goal) },
-                    onFocus = { QuickAddActivity.open(ctx, QuickAddActivity.Kind.FOCUS, goal.text, goal.id) },
+                    onDone = { complete(todo) },
+                    onFocus = { QuickAddActivity.open(ctx, QuickAddActivity.Kind.FOCUS, todo.text, todo.id) },
                     onEdit = {
                         view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                        editingGoalId = goal.id
+                        editingTodoId = todo.id
                     },
                 )
             }
@@ -333,12 +333,12 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}, onOpenNotes: () -> Unit = {}) {
                     )
                 }
                 if (showDone) {
-                    itemsIndexed(done, key = { _, g -> g.id }) { i, goal ->
+                    itemsIndexed(done, key = { _, t -> t.id }) { i, todo ->
                         DoneRow(
-                            goal,
+                            todo,
                             shape = segmentShape(i, done.size),
                             modifier = Modifier.animateItem(),
-                            onUndo = { GoalStore.setDone(goal.id, false) },
+                            onUndo = { TodoStore.setDone(todo.id, false) },
                         )
                     }
                 }
@@ -349,65 +349,65 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}, onOpenNotes: () -> Unit = {}) {
         }
     }
 
-    val editingGoal = editingGoalId?.let { id -> goals.firstOrNull { it.id == id && it.isActive } }
-    editingGoal?.let { goal ->
-        val canPutFirst = active.size > 1 && active.firstOrNull()?.id != goal.id
+    val editingTodo = editingTodoId?.let { id -> todos.firstOrNull { it.id == id && it.isActive } }
+    editingTodo?.let { todo ->
+        val canPutFirst = active.size > 1 && active.firstOrNull()?.id != todo.id
         val extras = buildList {
             if (canPutFirst) {
                 add(
                     SheetAction("Put first") { text ->
-                        if (text.trim() != goal.text) GoalStore.rename(goal.id, text)
-                        GoalStore.putFirst(goal.id)
-                        editingGoalId = null
+                        if (text.trim() != todo.text) TodoStore.rename(todo.id, text)
+                        TodoStore.putFirst(todo.id)
+                        editingTodoId = null
                     },
                 )
             }
             add(
                 SheetAction("In&Out") { text ->
-                    if (text.trim() != goal.text) GoalStore.rename(goal.id, text)
-                    editingGoalId = null
+                    if (text.trim() != todo.text) TodoStore.rename(todo.id, text)
+                    editingTodoId = null
                     QuickAddActivity.open(ctx, QuickAddActivity.Kind.TRIP, text.trim())
                 },
             )
         }
-        key(goal.id) {
+        key(todo.id) {
             EditSheet(
-                initial = goal.text,
+                initial = todo.text,
                 multiLine = false,
                 otherLabel = "Remind me…",
                 onOther = { text ->
-                    if (text.trim() != goal.text) GoalStore.rename(goal.id, text)
-                    editingGoalId = null
-                    remindGoalId = goal.id
+                    if (text.trim() != todo.text) TodoStore.rename(todo.id, text)
+                    editingTodoId = null
+                    remindTodoId = todo.id
                 },
                 extraActions = extras,
-                onDelete = { editingGoalId = null; remove(goal) },
+                onDelete = { editingTodoId = null; remove(todo) },
                 onClose = { text ->
-                    if (text.trim() != goal.text) GoalStore.rename(goal.id, text)
-                    editingGoalId = null
+                    if (text.trim() != todo.text) TodoStore.rename(todo.id, text)
+                    editingTodoId = null
                 },
             )
         }
     }
 
-    val remindGoal = remindGoalId?.let { id -> goals.firstOrNull { it.id == id && it.isActive } }
-    remindGoal?.let { goal ->
-        key(goal.id) {
+    val remindTodo = remindTodoId?.let { id -> todos.firstOrNull { it.id == id && it.isActive } }
+    remindTodo?.let { todo ->
+        key(todo.id) {
             HideAndRemindSheet(
-                goal = goal,
-                onDismiss = { remindGoalId = null },
+                todo = todo,
+                onDismiss = { remindTodoId = null },
                 onSaved = { reminder, keepOnList ->
-                    remindGoalId = null
+                    remindTodoId = null
                     if (keepOnList) {
                         offerUndo("Reminder set for ${whenText(reminder.startAt)}") {
                             ReminderStore.delete(reminder.id)
                         }
                     } else {
-                        GoalStore.delete(goal.id)
+                        TodoStore.delete(todo.id)
                         val timeText = comingUpTimeText(reminder.startAt)
                         val backLabel = if (timeText.startsWith("tomorrow")) "Back $timeText" else "Back at $timeText"
                         offerUndo(backLabel) {
-                            GoalStore.restore(goal.id)
+                            TodoStore.restore(todo.id)
                             ReminderStore.delete(reminder.id)
                         }
                     }
@@ -425,10 +425,10 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}, onOpenNotes: () -> Unit = {}) {
                     // Save any edit, keep the note intact, and copy its first line onto the list.
                     if (text.trim() != note.text) NoteStore.edit(note.id, text)
                     val first = Checklist.firstCleanLine(text)
-                    val goal = first?.let { GoalStore.add(it) }
+                    val todo = first?.let { TodoStore.add(it) }
                     editingNoteId = null
                     offerUndo("Added to your list") {
-                        goal?.let { GoalStore.delete(it.id) }
+                        todo?.let { TodoStore.delete(it.id) }
                     }
                 },
                 onDelete = {
@@ -535,8 +535,8 @@ private fun EmptyState(modifier: Modifier = Modifier) {
 /** Tap to tick it off, ▶ to focus on it, long-press to change it. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun GoalRow(
-    goal: Goal,
+private fun TodoRow(
+    todo: Todo,
     refresh: Int,
     shape: androidx.compose.ui.graphics.Shape,
     modifier: Modifier,
@@ -544,8 +544,8 @@ private fun GoalRow(
     onFocus: () -> Unit,
     onEdit: () -> Unit,
 ) {
-    val routineLabel = remember(goal.reminderId, goal.firedAt, refresh) {
-        if (goal.reminderId != null && goal.firedAt != null) sinceLabel(goal.firedAt) else null
+    val routineLabel = remember(todo.reminderId, todo.firedAt, refresh) {
+        if (todo.reminderId != null && todo.firedAt != null) sinceLabel(todo.firedAt) else null
     }
     Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainer, modifier = modifier.fillMaxWidth()) {
         Row(
@@ -562,7 +562,7 @@ private fun GoalRow(
             )
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f).padding(vertical = if (routineLabel != null) 12.dp else 18.dp)) {
-                Text(goal.text, style = MaterialTheme.typography.bodyLarge)
+                Text(todo.text, style = MaterialTheme.typography.bodyLarge)
                 if (routineLabel != null) {
                     val overdue = routineLabel.startsWith("since ")
                     Text(
@@ -614,7 +614,7 @@ private fun ComingUpRow(reminder: Reminder, shape: androidx.compose.ui.graphics.
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun DoneRow(goal: Goal, shape: androidx.compose.ui.graphics.Shape, modifier: Modifier, onUndo: () -> Unit) {
+private fun DoneRow(todo: Todo, shape: androidx.compose.ui.graphics.Shape, modifier: Modifier, onUndo: () -> Unit) {
     Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = modifier.fillMaxWidth()) {
         Row(
             Modifier.clickable(onClick = onUndo).padding(horizontal = 16.dp, vertical = 12.dp),
@@ -636,7 +636,7 @@ private fun DoneRow(goal: Goal, shape: androidx.compose.ui.graphics.Shape, modif
             }
             Spacer(Modifier.width(14.dp))
             Text(
-                goal.text,
+                todo.text,
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textDecoration = TextDecoration.LineThrough,
@@ -649,10 +649,10 @@ private fun DoneRow(goal: Goal, shape: androidx.compose.ui.graphics.Shape, modif
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun StillOnCard(
-    goals: List<Goal>,
+    todos: List<Todo>,
     modifier: Modifier,
-    onKeep: (Goal) -> Unit,
-    onDrop: (Goal) -> Unit,
+    onKeep: (Todo) -> Unit,
+    onDrop: (Todo) -> Unit,
     onKeepAll: () -> Unit,
 ) {
     Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.tertiaryContainer) {
@@ -663,14 +663,14 @@ private fun StillOnCard(
                 style = MaterialTheme.typography.bodyMedium,
             )
             Spacer(Modifier.height(8.dp))
-            goals.forEach { goal ->
+            todos.forEach { todo ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(goal.text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { onDrop(goal) }, shapes = ButtonDefaults.shapes()) { Text("Drop") }
-                    TextButton(onClick = { onKeep(goal) }, shapes = ButtonDefaults.shapes()) { Text("Keep") }
+                    Text(todo.text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { onDrop(todo) }, shapes = ButtonDefaults.shapes()) { Text("Drop") }
+                    TextButton(onClick = { onKeep(todo) }, shapes = ButtonDefaults.shapes()) { Text("Keep") }
                 }
             }
-            if (goals.size > 1) {
+            if (todos.size > 1) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     FilledTonalButton(onClick = onKeepAll, shapes = ButtonDefaults.shapes()) { Text("Keep all") }
                 }
@@ -688,7 +688,7 @@ private val HIDE_REMIND_PRESETS = listOf(10, 30, 60, 120)
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun HideAndRemindSheet(
-    goal: Goal,
+    todo: Todo,
     onDismiss: () -> Unit,
     onSaved: (reminder: Reminder, keepOnList: Boolean) -> Unit,
 ) {
@@ -719,7 +719,7 @@ private fun HideAndRemindSheet(
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.padding(horizontal = 24.dp).navigationBarsPadding().padding(bottom = 16.dp)) {
             Text(
-                goal.text,
+                todo.text,
                 style = MaterialTheme.typography.titleLargeEmphasized,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -770,7 +770,7 @@ private fun HideAndRemindSheet(
                 Spacer(Modifier.weight(1f))
                 Button(
                     onClick = {
-                        val reminder = Reminder.once(goal.text, targetAt(), alarm)
+                        val reminder = Reminder.once(todo.text, targetAt(), alarm)
                         ReminderStore.save(reminder)
                         onSaved(reminder, keepOnList)
                     },

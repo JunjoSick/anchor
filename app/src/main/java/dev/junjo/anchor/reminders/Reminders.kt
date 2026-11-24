@@ -11,8 +11,8 @@ import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.core.content.edit
 import dev.junjo.anchor.R
-import dev.junjo.anchor.data.Goal
-import dev.junjo.anchor.data.GoalStore
+import dev.junjo.anchor.data.Todo
+import dev.junjo.anchor.data.TodoStore
 import dev.junjo.anchor.data.Reminder
 import dev.junjo.anchor.data.ReminderStore
 import dev.junjo.anchor.data.active
@@ -125,7 +125,7 @@ object Reminders {
             }
             ACTION_DONE -> {
                 answered(ctx, id)
-                goalId?.let { GoalStore.setDone(it, true) }
+                goalId?.let { TodoStore.setDone(it, true) }
             }
             ACTION_SILENCE -> {
                 val r = ReminderStore.find(id) ?: return
@@ -153,7 +153,7 @@ object Reminders {
     /** What to do with the to-do list when a routine reminder goes off. */
     internal sealed class Occurrence {
         data class Create(val reminderId: String, val firedAt: Long) : Occurrence()
-        data class Reuse(val goalId: String, val attachReminderId: String?, val attachFiredAt: Long?) : Occurrence()
+        data class Reuse(val todoId: String, val attachReminderId: String?, val attachFiredAt: Long?) : Occurrence()
     }
 
     /**
@@ -162,7 +162,7 @@ object Reminders {
      * - Otherwise an open to-do with matching text and no [reminderId] is reused and tagged.
      * - Otherwise a new to-do is created with [reminderId] and [firedAt] = [now].
      */
-    internal fun resolveOccurrence(active: List<Goal>, reminderId: String, text: String, now: Long): Occurrence {
+    internal fun resolveOccurrence(active: List<Todo>, reminderId: String, text: String, now: Long): Occurrence {
         val byId = active.firstOrNull { it.reminderId == reminderId }
         if (byId != null) return Occurrence.Reuse(byId.id, attachReminderId = null, attachFiredAt = null)
         val byText = active.firstOrNull { it.reminderId == null && it.text.equals(text, ignoreCase = true) }
@@ -174,45 +174,45 @@ object Reminders {
         if (snoozed) clearSnooze(ctx, id)
         val r = ReminderStore.find(id) ?: return
         if (r.deleted || !r.enabled) return
-        var goal = goalId
+        var todoId = goalId
         if (!snoozed) {
             schedule(ctx, r) // The next one.
             if (r.addAsGoal) {
                 val now = System.currentTimeMillis()
-                val active = GoalStore.goals.value.active()
-                goal = if (!r.once) {
+                val active = TodoStore.todos.value.active()
+                todoId = if (!r.once) {
                     when (val decision = resolveOccurrence(active, r.id, r.text, now)) {
-                        is Occurrence.Create -> GoalStore.addFromRoutine(r.text, decision.reminderId, decision.firedAt)?.id
+                        is Occurrence.Create -> TodoStore.addFromRoutine(r.text, decision.reminderId, decision.firedAt)?.id
                         is Occurrence.Reuse -> {
                             if (decision.attachReminderId != null && decision.attachFiredAt != null) {
-                                GoalStore.attachRoutine(decision.goalId, decision.attachReminderId, decision.attachFiredAt)
+                                TodoStore.attachRoutine(decision.todoId, decision.attachReminderId, decision.attachFiredAt)
                             } else {
-                                GoalStore.putFirst(decision.goalId)
+                                TodoStore.putFirst(decision.todoId)
                             }
-                            decision.goalId
+                            decision.todoId
                         }
                     }
                 } else {
                     val existing = active.firstOrNull { it.text.equals(r.text, ignoreCase = true) }
                     if (existing != null) {
-                        GoalStore.putFirst(existing.id)
+                        TodoStore.putFirst(existing.id)
                         existing.id
                     } else {
-                        GoalStore.add(r.text, putFirst = true)?.id
+                        TodoStore.add(r.text, putFirst = true)?.id
                     }
                 }
             }
         }
-        // The goal may have been ticked off during a snooze; then there is nothing left to remind.
-        if (snoozed && goal != null && GoalStore.find(goal)?.isActive == false) return
+        // The to-do may have been ticked off during a snooze; then there is nothing left to remind.
+        if (snoozed && todoId != null && TodoStore.find(todoId)?.isActive == false) return
 
-        post(ctx, r, goal, loud = r.alarm)
+        post(ctx, r, todoId, loud = r.alarm)
         if (r.alarm) {
             _ringing.update { it + id }
             exact(
                 ctx.getSystemService(AlarmManager::class.java),
                 System.currentTimeMillis() + RING_FOR_MS,
-                broadcast(ctx, ACTION_SILENCE, id, goal),
+                broadcast(ctx, ACTION_SILENCE, id, todoId),
             )
         }
     }

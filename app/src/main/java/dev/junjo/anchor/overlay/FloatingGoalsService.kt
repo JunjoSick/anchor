@@ -99,8 +99,8 @@ import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import dev.junjo.anchor.MainActivity
 import dev.junjo.anchor.QuickAddActivity
 import dev.junjo.anchor.R
-import dev.junjo.anchor.data.Goal
-import dev.junjo.anchor.data.GoalStore
+import dev.junjo.anchor.data.Todo
+import dev.junjo.anchor.data.TodoStore
 import dev.junjo.anchor.data.active
 import dev.junjo.anchor.formatDuration
 import dev.junjo.anchor.notify.GoalsNotification
@@ -452,9 +452,9 @@ class FloatingGoalsService : Service(), LifecycleOwner, SavedStateRegistryOwner 
                         gestures = BubbleGestures(::dragStart, ::dragMove, ::dragEnd),
                         onUntuck = ::untuck,
                         onTuck = { tuck(if (leftX() + width() / 2 > screenWidth() / 2) Dock.RIGHT else Dock.LEFT) },
-                        onFocus = { goal ->
+                        onFocus = { todo ->
                             showList(false)
-                            QuickAddActivity.open(this@FloatingGoalsService, QuickAddActivity.Kind.FOCUS, goal.text, goal.id)
+                            QuickAddActivity.open(this@FloatingGoalsService, QuickAddActivity.Kind.FOCUS, todo.text, todo.id)
                         },
                         onAdd = { kind ->
                             showList(false)
@@ -746,19 +746,19 @@ private fun Bubble(
     gestures: BubbleGestures,
     onUntuck: () -> Unit,
     onTuck: () -> Unit,
-    onFocus: (Goal) -> Unit,
+    onFocus: (Todo) -> Unit,
     onAdd: (QuickAddActivity.Kind) -> Unit,
     onOpenApp: () -> Unit,
     onTripDone: () -> Unit,
     onTripLater: () -> Unit,
     onTripCancel: () -> Unit,
 ) {
-    val goals by GoalStore.goals.collectAsState()
+    val todos by TodoStore.todos.collectAsState()
     val timer by FocusTimer.state.collectAsState()
     val trip by Trips.state.collectAsState()
     val tripFlash by Trips.flashSerial.collectAsState()
     val nudge by AppPrefs.bubbleNudgeFlow.collectAsState()
-    val active = goals.active()
+    val active = todos.active()
 
     // Each piece below keeps its own clock (rememberNow), so a tick redraws only the piece that
     // shows the time, and each ticks only as often as what it shows can change.
@@ -793,7 +793,7 @@ private fun Bubble(
 /** The tucked-away bubble: a slim tab on the screen edge, still showing the count or the timer. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun EdgeTab(side: Dock, active: List<Goal>, timer: FocusTimer.State, nudge: Boolean, touch: Modifier) {
+private fun EdgeTab(side: Dock, active: List<Todo>, timer: FocusTimer.State, nudge: Boolean, touch: Modifier) {
     // The tab only shows a small disc, which changes visibly far less often than once a second.
     val now = rememberNow(
         active = timer.status == Status.RUNNING,
@@ -851,7 +851,7 @@ private fun EdgeTab(side: Dock, active: List<Goal>, timer: FocusTimer.State, nud
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun Pill(active: List<Goal>, timer: FocusTimer.State, touch: Modifier) {
+private fun Pill(active: List<Todo>, timer: FocusTimer.State, touch: Modifier) {
     val now = rememberNow(active = timer.status == Status.RUNNING, alignTo = timer.endAt)
     val top = active.firstOrNull()
     val warm = timer.status == Status.RINGING || timer.phase == FocusTimer.Phase.READY
@@ -925,11 +925,11 @@ private fun Pill(active: List<Goal>, timer: FocusTimer.State, touch: Modifier) {
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ExpandedList(
-    active: List<Goal>,
+    active: List<Todo>,
     timer: FocusTimer.State,
     maxHeight: Dp,
     drag: Modifier,
-    onFocus: (Goal) -> Unit,
+    onFocus: (Todo) -> Unit,
     onAdd: (QuickAddActivity.Kind) -> Unit,
     onOpenApp: () -> Unit,
     onTuck: () -> Unit,
@@ -1036,7 +1036,7 @@ private fun ExpandedList(
                 )
             }
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                active.forEachIndexed { i, goal ->
+                active.forEachIndexed { i, todo ->
                     Surface(
                         shape = segmentShape(i, active.size),
                         color = MaterialTheme.colorScheme.surfaceContainerLowest,
@@ -1046,7 +1046,7 @@ private fun ExpandedList(
                             Modifier
                                 .clickable {
                                     view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                                    GoalStore.setDone(goal.id, true)
+                                    TodoStore.setDone(todo.id, true)
                                 }
                                 .padding(start = 12.dp, end = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -1059,13 +1059,13 @@ private fun ExpandedList(
                             )
                             Spacer(Modifier.width(10.dp))
                             Text(
-                                goal.text,
+                                todo.text,
                                 style = MaterialTheme.typography.bodyLarge,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f).padding(vertical = 12.dp),
                             )
-                            IconButton(onClick = { onFocus(goal) }, shapes = IconButtonDefaults.shapes()) {
+                            IconButton(onClick = { onFocus(todo) }, shapes = IconButtonDefaults.shapes()) {
                                 Icon(
                                     painterResource(R.drawable.ic_play),
                                     contentDescription = "Focus on this",
@@ -1082,7 +1082,7 @@ private fun ExpandedList(
             val actionPad = PaddingValues(horizontal = 8.dp)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilledTonalButton(
-                    onClick = { onAdd(QuickAddActivity.Kind.GOAL) },
+                    onClick = { onAdd(QuickAddActivity.Kind.TODO) },
                     contentPadding = actionPad,
                     shapes = ButtonDefaults.shapes(),
                     modifier = Modifier.weight(1f),

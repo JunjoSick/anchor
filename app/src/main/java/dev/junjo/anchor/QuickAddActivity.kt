@@ -91,10 +91,10 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import dev.junjo.anchor.data.Checklist
-import dev.junjo.anchor.data.GoalStore
 import dev.junjo.anchor.data.NoteStore
 import dev.junjo.anchor.data.Reminder
 import dev.junjo.anchor.data.ReminderStore
+import dev.junjo.anchor.data.TodoStore
 import dev.junjo.anchor.overlay.FloatingGoals
 import dev.junjo.anchor.timer.FocusTimer
 import dev.junjo.anchor.trip.TripPolicy
@@ -122,10 +122,10 @@ import java.time.format.FormatStyle
  * Opened from ▶, a tile, a shortcut or the Reminders page, it starts directly in that mode.
  */
 class QuickAddActivity : ComponentActivity() {
-    enum class Kind { GOAL, NOTE, REMIND, FOCUS, TRIP }
+    enum class Kind { TODO, NOTE, REMIND, FOCUS, TRIP }
 
     /** What the sheet shows; [serial] counts requests, so each one starts with fresh state. */
-    private class Request(val kind: Kind, val text: String?, val goalId: String?, val serial: Int)
+    private class Request(val kind: Kind, val text: String?, val todoId: String?, val serial: Int)
 
     private var request by mutableStateOf<Request?>(null)
 
@@ -158,7 +158,7 @@ class QuickAddActivity : ComponentActivity() {
                                         else -> AddMode.PICK
                                     },
                                     initialText = r.text.orEmpty(),
-                                    goalId = r.goalId,
+                                    todoId = r.todoId,
                                     onSwitchToNote = { typed ->
                                         noteInitial = typed
                                         switchedToNote = true
@@ -191,7 +191,7 @@ class QuickAddActivity : ComponentActivity() {
             ACTION_REMIND -> Kind.REMIND
             ACTION_FOCUS -> Kind.FOCUS
             ACTION_TRIP -> Kind.TRIP
-            else -> Kind.GOAL
+            else -> Kind.TODO
         }
         // Focus has nothing to type, so the keyboard stays down; the others open with it up.
         window.setSoftInputMode(
@@ -212,10 +212,10 @@ class QuickAddActivity : ComponentActivity() {
         private const val EXTRA_GOAL = "goal"
         private const val STATE_SERIAL = "serial"
 
-        /** [text] fills the field, or for focus names what it's for; [goalId] ties a timer to a to-do. */
-        fun open(ctx: Context, kind: Kind, text: String? = null, goalId: String? = null) {
+        /** [text] fills the field, or for focus names what it's for; [todoId] ties a timer to a to-do. */
+        fun open(ctx: Context, kind: Kind, text: String? = null, todoId: String? = null) {
             val action = when (kind) {
-                Kind.GOAL -> ACTION_ADD_GOAL
+                Kind.TODO -> ACTION_ADD_GOAL
                 Kind.NOTE -> ACTION_NEW_NOTE
                 Kind.REMIND -> ACTION_REMIND
                 Kind.FOCUS -> ACTION_FOCUS
@@ -226,7 +226,7 @@ class QuickAddActivity : ComponentActivity() {
                     Intent(ctx, QuickAddActivity::class.java)
                         .setAction(action)
                         .apply { if (text != null) putExtra(EXTRA_TEXT, text) }
-                        .apply { if (goalId != null) putExtra(EXTRA_GOAL, goalId) }
+                        .apply { if (todoId != null) putExtra(EXTRA_GOAL, todoId) }
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 )
             }
@@ -303,7 +303,7 @@ private fun SheetTitle(text: String, onBack: (() -> Unit)? = null) {
 private fun AddSheetContent(
     initialMode: AddMode,
     initialText: String,
-    goalId: String?,
+    todoId: String?,
     onSwitchToNote: (String) -> Unit,
     onClose: () -> Unit,
 ) {
@@ -335,7 +335,7 @@ private fun AddSheetContent(
 
     fun addTodo(): Boolean {
         if (text.isBlank()) return false
-        GoalStore.add(text)
+        TodoStore.add(text)
         text = ""
         added++
         return true
@@ -403,7 +403,7 @@ private fun AddSheetContent(
         AddMode.FOCUS -> {
             FocusVerbContent(
                 label = text.trim().takeIf { it.isNotEmpty() },
-                goalId = goalId,
+                todoId = todoId,
                 onBack = if (canGoBack) { { mode = AddMode.PICK } } else null,
                 onClose = onClose,
             )
@@ -642,7 +642,7 @@ private fun RemindVerbContent(
 /** Focus mode inside the add sheet: pick a length, then start now or after a get-ready countdown. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun FocusVerbContent(label: String?, goalId: String?, onBack: (() -> Unit)?, onClose: () -> Unit) {
+private fun FocusVerbContent(label: String?, todoId: String?, onBack: (() -> Unit)?, onClose: () -> Unit) {
     val ctx = LocalContext.current
     val timer by FocusTimer.state.collectAsState()
     var focus by rememberSaveable { mutableIntStateOf(AppPrefs.focusMinutes(ctx)) }
@@ -654,9 +654,9 @@ private fun FocusVerbContent(label: String?, goalId: String?, onBack: (() -> Uni
         AppPrefs.setFocusMinutes(ctx, focus)
         if (readyMinutes > 0) {
             AppPrefs.setReadyMinutes(ctx, readyMinutes)
-            FocusTimer.startAfter(readyMinutes, focus, label, goalId)
+            FocusTimer.startAfter(readyMinutes, focus, label, todoId)
         } else {
-            FocusTimer.start(focus, label, goalId)
+            FocusTimer.start(focus, label, todoId)
         }
         onClose()
     }

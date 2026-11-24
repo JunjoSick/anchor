@@ -16,7 +16,7 @@ import java.util.concurrent.Executors
 
 /**
  * Something written down that isn't a task: a thought, an idea, a thing to look up. Kept apart
- * from goals so the goal list stays short. Same sync-ready fields as [Goal].
+ * from to-dos so the list stays short. Same sync-ready fields as [Todo].
  */
 data class Note(
     val id: String,
@@ -51,7 +51,7 @@ fun List<Note>.visible(): List<Note> = filter { !it.deleted }.sortedByDescending
 object NoteStore {
     private const val TAG = "NoteStore"
 
-    /** Deleted notes are kept this long before pruning, matching [GoalStore]. */
+    /** Deleted notes are kept this long before pruning, matching [TodoStore]. */
     internal const val HISTORY_MS = 90L * 24 * 60 * 60 * 1000
 
     private lateinit var appContext: Context
@@ -110,7 +110,7 @@ object NoteStore {
     private fun update(change: (List<Note>) -> List<Note>) = synchronized(lock) {
         val next = change(_notes.value)
         _notes.value = next
-        disk.execute { write(next) } // Off the main thread, in order; see GoalStore.
+        disk.execute { write(next) } // Off the main thread, in order; see TodoStore.
     }
 
     private fun read(): List<Note> = try {

@@ -32,7 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.junjo.anchor.data.GoalStore
+import dev.junjo.anchor.data.TodoStore
 import dev.junjo.anchor.minutesText
 import dev.junjo.anchor.ui.AnchorTheme
 
@@ -105,10 +105,10 @@ private fun AlarmScreen(state: FocusTimer.State) {
                     Text("Cancel", style = MaterialTheme.typography.titleMedium)
                 }
             } else {
-                val goalId = state.goalId
-                if (goalId != null && GoalStore.find(goalId)?.isActive == true) {
+                val todoId = state.todoId
+                if (todoId != null && TodoStore.find(todoId)?.isActive == true) {
                     Button(
-                        onClick = { GoalStore.setDone(goalId, true); FocusTimer.stop() },
+                        onClick = { TodoStore.setDone(todoId, true); FocusTimer.stop() },
                         shapes = ButtonDefaults.shapes(),
                         modifier = big,
                         contentPadding = bigPadding,

@@ -21,7 +21,7 @@ import java.util.UUID
 import java.util.concurrent.Executors
 
 /**
- * A reminder that repeats at the same time on chosen days. Same sync-ready fields as [Goal]:
+ * A reminder that repeats at the same time on chosen days. Same sync-ready fields as [Todo]:
  * random id, updatedAt and soft delete.
  */
 data class Reminder(
@@ -161,7 +161,7 @@ data class Reminder(
 object ReminderStore {
     private const val TAG = "ReminderStore"
 
-    /** Deleted repeating reminders are kept this long before pruning, matching [GoalStore]. */
+    /** Deleted repeating reminders are kept this long before pruning, matching [TodoStore]. */
     internal const val HISTORY_MS = 90L * 24 * 60 * 60 * 1000
     internal const val ONCE_KEEP_MS = 24L * 60 * 60 * 1000
     internal const val COMING_UP_WINDOW_MS = 24L * 60 * 60 * 1000
@@ -210,7 +210,7 @@ object ReminderStore {
             val list = _reminders.value
             val next = if (list.any { it.id == changed.id }) list.map { if (it.id == changed.id) changed else it } else list + changed
             _reminders.value = next
-            disk.execute { write(next) } // Off the main thread, in order; see GoalStore.
+            disk.execute { write(next) } // Off the main thread, in order; see TodoStore.
         }
         Reminders.schedule(appContext, changed)
     }

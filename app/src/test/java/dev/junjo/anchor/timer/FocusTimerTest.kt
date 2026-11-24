@@ -16,7 +16,7 @@ class FocusTimerTest {
     private val now = 1_800_000_000_000L
 
     private fun running(minutes: Int, endsIn: Long = minutes * MINUTE) =
-        State(Status.RUNNING, totalMs = minutes * MINUTE, endAt = now + endsIn, label = "Write", goalId = "g")
+        State(Status.RUNNING, totalMs = minutes * MINUTE, endAt = now + endsIn, label = "Write", todoId = "g")
 
     @Test fun remaining() {
         assertEquals(3 * MINUTE, running(5, endsIn = 3 * MINUTE).remaining(now))
@@ -64,7 +64,7 @@ class FocusTimerTest {
     }
 
     private fun gettingReady(readyMin: Int, focusMin: Int, endsIn: Long = readyMin * MINUTE) =
-        State(Status.RUNNING, readyMin * MINUTE, now + endsIn, label = "Write", goalId = "g", phase = Phase.READY, focusMs = focusMin * MINUTE)
+        State(Status.RUNNING, readyMin * MINUTE, now + endsIn, label = "Write", todoId = "g", phase = Phase.READY, focusMs = focusMin * MINUTE)
 
     @Test fun gettingReadyHasNoHeadsUps() {
         // Even a long get-ready countdown only has its end.

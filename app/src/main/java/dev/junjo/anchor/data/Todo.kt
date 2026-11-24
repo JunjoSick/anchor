@@ -16,7 +16,7 @@ import java.util.Locale
  * The random id, updatedAt and soft delete are there so a later version can sync between phones
  * by merging on id and keeping the newest change, without changing how items are stored.
  */
-data class Goal(
+data class Todo(
     val id: String,
     val text: String,
     /** Kept for compatibility with older versions; staleness now uses [updatedAt]. */
@@ -48,7 +48,7 @@ data class Goal(
     }
 
     companion object {
-        fun fromJson(o: JSONObject) = Goal(
+        fun fromJson(o: JSONObject) = Todo(
             id = o.getString("id"),
             text = o.getString("text"),
             day = o.getString("day"),
@@ -74,18 +74,18 @@ fun startOfToday(): Long =
 // The views of the list that the screen, widget and notification all share.
 
 /** To-dos still to do: any put first (most recent on top), then the rest in the order added. */
-fun List<Goal>.active(): List<Goal> =
-    filter { it.isActive }.sortedWith(compareByDescending<Goal> { it.pinnedAt ?: Long.MIN_VALUE }.thenBy { it.createdAt })
+fun List<Todo>.active(): List<Todo> =
+    filter { it.isActive }.sortedWith(compareByDescending<Todo> { it.pinnedAt ?: Long.MIN_VALUE }.thenBy { it.createdAt })
 
 /** To-dos untouched for at least 3 days. Never pinned to-dos and never routine to-dos. */
-fun List<Goal>.stale(now: Long = System.currentTimeMillis()): List<Goal> =
+fun List<Todo>.stale(now: Long = System.currentTimeMillis()): List<Todo> =
     active().filter { it.pinnedAt == null && it.reminderId == null && now - it.updatedAt >= STALE_MS }
 
 /** Older day-based helper retained for unit tests and compatibility. */
-fun List<Goal>.carriedOver(today: String = today()): List<Goal> = active().filter { it.day < today }
+fun List<Todo>.carriedOver(today: String = today()): List<Todo> = active().filter { it.day < today }
 
 /** To-dos ticked off since midnight, newest first. */
-fun List<Goal>.doneToday(startOfDay: Long = startOfToday()): List<Goal> =
+fun List<Todo>.doneToday(startOfDay: Long = startOfToday()): List<Todo> =
     filter { !it.deleted && (it.doneAt ?: 0L) >= startOfDay }.sortedByDescending { it.doneAt }
 
 /**

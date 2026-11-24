@@ -74,7 +74,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.junjo.anchor.QuickAddActivity
 import dev.junjo.anchor.R
 import dev.junjo.anchor.data.Checklist
-import dev.junjo.anchor.data.GoalStore
+import dev.junjo.anchor.data.TodoStore
 import dev.junjo.anchor.data.Note
 import dev.junjo.anchor.data.NoteLine
 import dev.junjo.anchor.data.NoteStore
@@ -157,9 +157,9 @@ fun NotesScreen(onBack: () -> Unit) {
                 onMakeTodo = { text ->
                     if (text.trim() != note.text) NoteStore.edit(note.id, text)
                     val first = Checklist.firstCleanLine(text)
-                    val goal = first?.let { GoalStore.add(it) }
+                    val todo = first?.let { TodoStore.add(it) }
                     editingNoteId = null
-                    offerUndo("Added to your list") { goal?.let { GoalStore.delete(it.id) } }
+                    offerUndo("Added to your list") { todo?.let { TodoStore.delete(it.id) } }
                 },
                 onDelete = {
                     NoteStore.delete(note.id)

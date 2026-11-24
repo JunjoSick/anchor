@@ -38,7 +38,7 @@ object FocusTimer {
         /** Time left while paused. */
         val remainingMs: Long = 0,
         val label: String? = null,
-        val goalId: String? = null,
+        val todoId: String? = null,
         val phase: Phase = Phase.FOCUS,
         /** While getting ready: how long the focus block that follows will be. */
         val focusMs: Long = 0,
@@ -89,20 +89,20 @@ object FocusTimer {
         _state.value = load()
     }
 
-    fun start(minutes: Int, label: String? = null, goalId: String? = null) {
+    fun start(minutes: Int, label: String? = null, todoId: String? = null) {
         val total = minutes * MINUTE
         TimerNotifications.clearAlerts(appContext)
-        set(State(Status.RUNNING, total, now() + total, 0, label, goalId))
+        set(State(Status.RUNNING, total, now() + total, 0, label, todoId))
         scheduleAlarms()
         TimerNotifications.showRunning(appContext, _state.value)
     }
 
     /** Counts down [readyMinutes], then starts a [focusMinutes] block by itself. */
-    fun startAfter(readyMinutes: Int, focusMinutes: Int, label: String? = null, goalId: String? = null) {
-        if (readyMinutes <= 0) return start(focusMinutes, label, goalId)
+    fun startAfter(readyMinutes: Int, focusMinutes: Int, label: String? = null, todoId: String? = null) {
+        if (readyMinutes <= 0) return start(focusMinutes, label, todoId)
         val ready = readyMinutes * MINUTE
         TimerNotifications.clearAlerts(appContext)
-        set(State(Status.RUNNING, ready, now() + ready, 0, label, goalId, Phase.READY, focusMinutes * MINUTE))
+        set(State(Status.RUNNING, ready, now() + ready, 0, label, todoId, Phase.READY, focusMinutes * MINUTE))
         scheduleAlarms()
         TimerNotifications.showRunning(appContext, _state.value)
     }
@@ -149,12 +149,12 @@ object FocusTimer {
             }
             Status.RINGING -> {
                 if (s.phase == Phase.READY) {
-                    startAfter(minutes, (s.focusMs / MINUTE).toInt().coerceAtLeast(1), s.label, s.goalId)
+                    startAfter(minutes, (s.focusMs / MINUTE).toInt().coerceAtLeast(1), s.label, s.todoId)
                 } else {
-                    start(minutes, s.label, s.goalId)
+                    start(minutes, s.label, s.todoId)
                 }
             }
-            Status.IDLE -> start(minutes, s.label, s.goalId)
+            Status.IDLE -> start(minutes, s.label, s.todoId)
         }
     }
 
@@ -238,7 +238,7 @@ object FocusTimer {
 
     /** The focus block that follows getting ready, starting at [at]. */
     internal fun focusAfterReady(s: State, at: Long): State =
-        State(Status.RUNNING, s.focusMs, at + s.focusMs, 0, s.label, s.goalId, Phase.FOCUS, 0, readyMs = s.totalMs)
+        State(Status.RUNNING, s.focusMs, at + s.focusMs, 0, s.label, s.todoId, Phase.FOCUS, 0, readyMs = s.totalMs)
 
     /**
      * The state to carry on from after a reboot. Any timer (focus or get-ready) that ran out
@@ -324,7 +324,7 @@ object FocusTimer {
             putLong("end", s.endAt)
             putLong("remaining", s.remainingMs)
             putString("label", s.label)
-            putString("goal", s.goalId)
+            putString("goal", s.todoId)
             putString("phase", s.phase.name)
             putLong("focus", s.focusMs)
             putLong("ready", s.readyMs)
@@ -338,7 +338,7 @@ object FocusTimer {
         endAt = prefs.getLong("end", 0),
         remainingMs = prefs.getLong("remaining", 0),
         label = prefs.getString("label", null),
-        goalId = prefs.getString("goal", null),
+        todoId = prefs.getString("goal", null),
         phase = runCatching { Phase.valueOf(prefs.getString("phase", null) ?: "FOCUS") }.getOrDefault(Phase.FOCUS),
         focusMs = prefs.getLong("focus", 0),
         readyMs = prefs.getLong("ready", 0),

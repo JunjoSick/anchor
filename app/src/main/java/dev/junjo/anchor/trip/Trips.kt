@@ -11,7 +11,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.edit
 import dev.junjo.anchor.QuickAddActivity
 import dev.junjo.anchor.R
-import dev.junjo.anchor.data.GoalStore
+import dev.junjo.anchor.data.TodoStore
 import dev.junjo.anchor.notify.Notifications
 import dev.junjo.anchor.overlay.FloatingGoals
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -135,10 +135,10 @@ object Trips {
         _flashSerial.update { it + 1 }
     }
 
-    /** Ends the trip and adds its name to today's goal list. */
+    /** Ends the trip and adds its name to your to-do list. */
     fun later() {
         val name = _state.value.name
-        if (name.isNotBlank()) GoalStore.add(name)
+        if (name.isNotBlank()) TodoStore.add(name)
         done()
     }
 

@@ -36,7 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.junjo.anchor.R
 import dev.junjo.anchor.clockTime
-import dev.junjo.anchor.data.GoalStore
+import dev.junjo.anchor.data.TodoStore
 import dev.junjo.anchor.formatDuration
 import dev.junjo.anchor.minutesText
 import dev.junjo.anchor.timer.FocusTimer
@@ -133,9 +133,9 @@ fun TimerCard(state: FocusTimer.State, modifier: Modifier = Modifier) {
                     Modifier.fillMaxWidth().padding(top = 8.dp, end = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                 ) {
-                    val goalId = state.goalId
-                    if (goalId != null && GoalStore.find(goalId)?.isActive == true) {
-                        TextButton(onClick = { GoalStore.setDone(goalId, true); FocusTimer.stop() }, shapes = ButtonDefaults.shapes()) {
+                    val todoId = state.todoId
+                    if (todoId != null && TodoStore.find(todoId)?.isActive == true) {
+                        TextButton(onClick = { TodoStore.setDone(todoId, true); FocusTimer.stop() }, shapes = ButtonDefaults.shapes()) {
                             Text("Done ✓")
                         }
                     }

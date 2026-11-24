@@ -3,19 +3,19 @@ package dev.junjo.anchor.notify
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import dev.junjo.anchor.data.GoalStore
+import dev.junjo.anchor.data.TodoStore
 
-/** Handles "Add goal" (typed into the notification) and "Done" from the goals notification. */
+/** Handles "Add" (typed into the notification) and "Done" from the lock-screen notification. */
 class GoalActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             GoalsNotification.ACTION_ADD -> {
-                GoalsNotification.typedText(intent)?.let { GoalStore.add(it) }
+                GoalsNotification.typedText(intent)?.let { TodoStore.add(it) }
                 // Re-post even if nothing was added, or the reply field keeps spinning.
                 GoalsNotification.update(context)
             }
             GoalsNotification.ACTION_DONE ->
-                intent.getStringExtra(GoalsNotification.EXTRA_ID)?.let { GoalStore.setDone(it, true) }
+                intent.getStringExtra(GoalsNotification.EXTRA_ID)?.let { TodoStore.setDone(it, true) }
         }
     }
 }

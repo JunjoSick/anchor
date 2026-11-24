@@ -1,7 +1,7 @@
 package dev.junjo.anchor
 
 import android.app.Application
-import dev.junjo.anchor.data.GoalStore
+import dev.junjo.anchor.data.TodoStore
 import dev.junjo.anchor.data.NoteStore
 import dev.junjo.anchor.data.ReminderStore
 import dev.junjo.anchor.reminders.Reminders
@@ -20,7 +20,7 @@ class AnchorApp : Application() {
         // stores here means every entry point sees the same goals and timer.
         Notifications.createChannels(this)
         AppPrefs.init(this)
-        GoalStore.init(this)
+        TodoStore.init(this)
         FocusTimer.init(this)
         FocusTimer.catchUp()
         Trips.init(this)

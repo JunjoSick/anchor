@@ -49,24 +49,27 @@ import dev.junjo.anchor.MainActivity
 import dev.junjo.anchor.QuickAddActivity
 import dev.junjo.anchor.R
 import dev.junjo.anchor.clockTime
-import dev.junjo.anchor.data.Goal
-import dev.junjo.anchor.data.GoalStore
+import dev.junjo.anchor.data.Todo
+import dev.junjo.anchor.data.TodoStore
 import dev.junjo.anchor.data.active
 import dev.junjo.anchor.data.doneToday
 import dev.junjo.anchor.timer.FocusTimer
 
 /**
- * The home-screen widget, the main way to see goals: always in sight, with no need to remember
- * to open anything. Tap a goal to tick it off (tap again to undo), + to add one.
+ * The home-screen widget, the main way to see to-dos: always in sight, with no need to remember
+ * to open anything. Tap a to-do to tick it off (tap again to undo), + to add one.
+ *
+ * Class names [GoalsWidgetReceiver], [GoalsWidget] and [ToggleGoalAction] stay as they are so
+ * existing pinned home-screen widgets survive app updates without disappearing.
  */
 class GoalsWidget : GlanceAppWidget() {
     override val sizeMode: SizeMode = SizeMode.Exact
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
-            val goals by GoalStore.goals.collectAsState()
+            val todos by TodoStore.todos.collectAsState()
             val timer by FocusTimer.state.collectAsState()
-            GlanceTheme { WidgetContent(goals, timer) }
+            GlanceTheme { WidgetContent(todos, timer) }
         }
     }
 }
@@ -79,17 +82,17 @@ private val GoalIdKey = ActionParameters.Key<String>("goal_id")
 
 class ToggleGoalAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        parameters[GoalIdKey]?.let { GoalStore.toggle(it) }
+        parameters[GoalIdKey]?.let { TodoStore.toggle(it) }
     }
 }
 
-/** How many ticked-off goals stay visible on the widget, as a small win and an easy undo. */
+/** How many ticked-off to-dos stay visible on the widget, as a small win and an easy undo. */
 private const val DONE_SHOWN = 3
 
 @Composable
-private fun WidgetContent(goals: List<Goal>, timer: FocusTimer.State) {
-    val active = goals.active()
-    val done = goals.doneToday().take(DONE_SHOWN)
+private fun WidgetContent(todos: List<Todo>, timer: FocusTimer.State) {
+    val active = todos.active()
+    val done = todos.doneToday().take(DONE_SHOWN)
     // Narrow widgets (like 2×2) move the timer chip onto its own line so the title and + never clip.
     val compact = LocalSize.current.width < 250.dp
     val btnSize = if (compact) 34.dp else 36.dp
@@ -167,8 +170,8 @@ private fun WidgetContent(goals: List<Goal>, timer: FocusTimer.State) {
             )
         } else {
             LazyColumn(GlanceModifier.fillMaxWidth().defaultWeight()) {
-                items(active, itemId = { it.id.hashCode().toLong() }) { GoalLine(it, done = false) }
-                items(done, itemId = { "done-${it.id}".hashCode().toLong() }) { GoalLine(it, done = true) }
+                items(active, itemId = { it.id.hashCode().toLong() }) { TodoLine(it, done = false) }
+                items(done, itemId = { "done-${it.id}".hashCode().toLong() }) { TodoLine(it, done = true) }
             }
         }
     }
@@ -214,12 +217,12 @@ private fun TimerChip(timer: FocusTimer.State, compact: Boolean = false) {
 }
 
 @Composable
-private fun GoalLine(goal: Goal, done: Boolean) {
+private fun TodoLine(todo: Todo, done: Boolean) {
     Row(
         GlanceModifier
             .fillMaxWidth()
             .padding(vertical = 5.dp)
-            .clickable(actionRunCallback<ToggleGoalAction>(actionParametersOf(GoalIdKey to goal.id))),
+            .clickable(actionRunCallback<ToggleGoalAction>(actionParametersOf(GoalIdKey to todo.id))),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Image(
@@ -230,7 +233,7 @@ private fun GoalLine(goal: Goal, done: Boolean) {
         )
         Spacer(GlanceModifier.width(10.dp))
         Text(
-            goal.text,
+            todo.text,
             maxLines = 2,
             style = TextStyle(
                 color = if (done) GlanceTheme.colors.onSurfaceVariant else GlanceTheme.colors.onSurface,
