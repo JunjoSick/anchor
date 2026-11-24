@@ -1,26 +1,36 @@
 package dev.junjo.anchor.data
 
 import org.json.JSONObject
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.time.temporal.ChronoUnit
+import java.util.Locale
 
 /**
- * One short-term goal.
+ * One to-do item.
  *
- * The random id, updatedAt and soft delete are there so a later version can sync goals between
- * phones by merging on id and keeping the newest change, without changing how goals are stored.
+ * The random id, updatedAt and soft delete are there so a later version can sync between phones
+ * by merging on id and keeping the newest change, without changing how items are stored.
  */
 data class Goal(
     val id: String,
     val text: String,
-    /** The day this goal is planned for, as an ISO date (2026-11-13). */
+    /** Kept for compatibility with older versions; staleness now uses [updatedAt]. */
     val day: String,
     val createdAt: Long,
     val updatedAt: Long,
     val doneAt: Long? = null,
     val deleted: Boolean = false,
-    /** When the user pinned this goal to the top; most recently pinned comes first. */
+    /** When the user pinned this to-do to the top; most recently pinned comes first. */
     val pinnedAt: Long? = null,
+    /** The routine reminder that created (or matched) this to-do, if any. */
+    val reminderId: String? = null,
+    /** When the oldest still-open occurrence of [reminderId] went off. */
+    val firedAt: Long? = null,
 ) {
     val isActive: Boolean get() = !deleted && doneAt == null
 
@@ -33,6 +43,8 @@ data class Goal(
         if (doneAt != null) put("doneAt", doneAt)
         put("deleted", deleted)
         if (pinnedAt != null) put("pinnedAt", pinnedAt)
+        if (reminderId != null) put("reminderId", reminderId)
+        if (firedAt != null) put("firedAt", firedAt)
     }
 
     companion object {
@@ -45,9 +57,14 @@ data class Goal(
             doneAt = if (o.has("doneAt")) o.getLong("doneAt") else null,
             deleted = o.optBoolean("deleted", false),
             pinnedAt = if (o.has("pinnedAt")) o.getLong("pinnedAt") else null,
+            reminderId = if (o.has("reminderId")) o.getString("reminderId") else null,
+            firedAt = if (o.has("firedAt")) o.getLong("firedAt") else null,
         )
     }
 }
+
+/** Untouched ordinary to-dos ask "Still on?" after three days. */
+const val STALE_MS = 3L * 24 * 60 * 60 * 1000
 
 fun today(): String = LocalDate.now().toString()
 
@@ -56,13 +73,38 @@ fun startOfToday(): Long =
 
 // The views of the list that the screen, widget and notification all share.
 
-/** Goals still to do: any put first (most recent on top), then the rest in the order added. */
+/** To-dos still to do: any put first (most recent on top), then the rest in the order added. */
 fun List<Goal>.active(): List<Goal> =
     filter { it.isActive }.sortedWith(compareByDescending<Goal> { it.pinnedAt ?: Long.MIN_VALUE }.thenBy { it.createdAt })
 
-/** Goals still to do that were planned for an earlier day and need a keep-or-drop decision. */
+/** To-dos untouched for at least 3 days. Never pinned to-dos and never routine to-dos. */
+fun List<Goal>.stale(now: Long = System.currentTimeMillis()): List<Goal> =
+    active().filter { it.pinnedAt == null && it.reminderId == null && now - it.updatedAt >= STALE_MS }
+
+/** Older day-based helper retained for unit tests and compatibility. */
 fun List<Goal>.carriedOver(today: String = today()): List<Goal> = active().filter { it.day < today }
 
-/** Goals ticked off since midnight, newest first. */
+/** To-dos ticked off since midnight, newest first. */
 fun List<Goal>.doneToday(startOfDay: Long = startOfToday()): List<Goal> =
     filter { !it.deleted && (it.doneAt ?: 0L) >= startOfDay }.sortedByDescending { it.doneAt }
+
+/**
+ * Label for a routine to-do's oldest still-open occurrence:
+ * today → "8:00", yesterday → "since yesterday 8:00", 2–6 days ago → "since Mon 8:00",
+ * older → "since 17 Nov".
+ */
+fun sinceLabel(
+    firedAt: Long,
+    now: ZonedDateTime = ZonedDateTime.now(),
+    timeFormat: DateTimeFormatter = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT),
+): String {
+    val fired = Instant.ofEpochMilli(firedAt).atZone(now.zone)
+    val days = ChronoUnit.DAYS.between(fired.toLocalDate(), now.toLocalDate())
+    val time = fired.toLocalTime().format(timeFormat)
+    return when {
+        days <= 0L -> time
+        days == 1L -> "since yesterday $time"
+        days in 2L..6L -> "since ${fired.toLocalDate().format(DateTimeFormatter.ofPattern("EEE", Locale.ENGLISH))} $time"
+        else -> "since ${fired.toLocalDate().format(DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH))}"
+    }
+}

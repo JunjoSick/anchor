@@ -79,20 +79,55 @@ object GoalStore {
 
     fun restore(id: String) = edit(id) { it.copy(deleted = false) }
 
-    fun keepForToday(id: String) = edit(id) { it.copy(day = today()) }
+    /** Adds a to-do created by a routine reminder, pinned to the top with its occurrence metadata. */
+    fun addFromRoutine(text: String, reminderId: String, firedAt: Long): Goal? {
+        val clean = text.trim().replace(Regex("\\s+"), " ")
+        if (clean.isEmpty()) return null
+        val now = System.currentTimeMillis()
+        val goal = Goal(
+            UUID.randomUUID().toString(),
+            clean,
+            today(),
+            now,
+            now,
+            pinnedAt = now,
+            reminderId = reminderId,
+            firedAt = firedAt,
+        )
+        update { it + goal }
+        return goal
+    }
 
-    /** Moves a goal to the top of the list (and onto the floating pill and notification). */
+    /** Attaches routine metadata to a reused open to-do (keeping any older [firedAt]) and puts it first. */
+    fun attachRoutine(id: String, reminderId: String, firedAt: Long) = edit(id) {
+        it.copy(
+            pinnedAt = System.currentTimeMillis(),
+            reminderId = it.reminderId ?: reminderId,
+            firedAt = it.firedAt ?: firedAt,
+        )
+    }
+
+    /** Resets the 3-day staleness timer on a to-do. */
+    fun keep(id: String) = edit(id) { it.copy(day = today()) }
+
+    /** Resets the 3-day staleness timer on every currently stale to-do. */
+    fun keepAll(now: Long = System.currentTimeMillis()) {
+        val day = today()
+        val staleIds = _goals.value.stale(now).map { it.id }.toSet()
+        if (staleIds.isEmpty()) return
+        update { list -> list.map { if (it.id in staleIds) it.copy(day = day, updatedAt = now) else it } }
+    }
+
+    fun keepForToday(id: String) = keep(id)
+
+    fun keepAllForToday() = keepAll()
+
+    /** Moves a to-do to the top of the list (and onto the floating pill and notification). */
     fun putFirst(id: String) = edit(id) { it.copy(pinnedAt = System.currentTimeMillis()) }
 
     fun merge(incoming: List<Goal>) {
         if (incoming.isEmpty()) return
         update { prune(Backup.mergeById(it, incoming, Goal::id, Goal::updatedAt)) }
-    }
-
-    fun keepAllForToday() {
-        val day = today()
-        val now = System.currentTimeMillis()
-        update { list -> list.map { if (it.isActive && it.day < day) it.copy(day = day, updatedAt = now) else it } }
     }
 
     private fun edit(id: String, change: (Goal) -> Goal) {

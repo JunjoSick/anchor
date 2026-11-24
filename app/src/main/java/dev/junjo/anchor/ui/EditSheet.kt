@@ -2,6 +2,8 @@ package dev.junjo.anchor.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -37,11 +39,14 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 
+/** One tonal action button inside [EditSheet] (e.g. Put first, Remind me…, In&Out). */
+class SheetAction(val label: String, val onClick: (text: String) -> Unit)
+
 /**
- * One sheet for changing a goal or a note: the text, Delete, the one or two other things you might
- * want to do with it, and Done. Closing it any way keeps the edit, so there is no Save to forget.
+ * One sheet for changing a to-do or a note: the text, Delete, any contextual actions, and Done.
+ * Closing it any way keeps the edit, so there is no Save to forget.
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun EditSheet(
     initial: String,
@@ -50,8 +55,7 @@ fun EditSheet(
     onOther: (text: String) -> Unit,
     onDelete: () -> Unit,
     onClose: (text: String) -> Unit,
-    extraLabel: String? = null,
-    onExtra: ((text: String) -> Unit)? = null,
+    extraActions: List<SheetAction> = emptyList(),
 ) {
     var text by rememberSaveable { mutableStateOf(initial) }
     ModalBottomSheet(onDismissRequest = { onClose(text) }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
@@ -74,15 +78,25 @@ fun EditSheet(
                 ),
                 keyboardActions = KeyboardActions(onDone = { onClose(text) }),
             )
-            if (extraLabel != null && onExtra != null) {
+            if (extraActions.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-                    FilledTonalButton(onClick = { onExtra(text) }, enabled = text.isNotBlank(), shapes = ButtonDefaults.shapes()) {
-                        Text(extraLabel)
+                FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    extraActions.forEach { action ->
+                        FilledTonalButton(
+                            onClick = { action.onClick(text) },
+                            enabled = text.isNotBlank(),
+                            shapes = ButtonDefaults.shapes(),
+                        ) { Text(action.label) }
                     }
-                    FilledTonalButton(onClick = { onOther(text) }, enabled = text.isNotBlank(), shapes = ButtonDefaults.shapes()) {
-                        Text(otherLabel)
-                    }
+                    FilledTonalButton(
+                        onClick = { onOther(text) },
+                        enabled = text.isNotBlank(),
+                        shapes = ButtonDefaults.shapes(),
+                    ) { Text(otherLabel) }
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {

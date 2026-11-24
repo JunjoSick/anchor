@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -28,10 +29,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconToggleButton
 import androidx.compose.material3.FloatingActionButtonMenu
 import androidx.compose.material3.FloatingActionButtonMenuItem
 import androidx.compose.material3.Icon
@@ -47,6 +50,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleFloatingActionButton
@@ -82,6 +86,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.junjo.anchor.AppPrefs
 import dev.junjo.anchor.QuickAddActivity
 import dev.junjo.anchor.R
+import dev.junjo.anchor.clockTime
 import dev.junjo.anchor.data.Goal
 import dev.junjo.anchor.data.GoalStore
 import dev.junjo.anchor.data.NoteStore
@@ -89,6 +94,8 @@ import dev.junjo.anchor.data.Reminder
 import dev.junjo.anchor.data.ReminderStore
 import dev.junjo.anchor.data.active
 import dev.junjo.anchor.data.doneToday
+import dev.junjo.anchor.data.sinceLabel
+import dev.junjo.anchor.data.stale
 import dev.junjo.anchor.data.today
 import dev.junjo.anchor.data.visible
 import dev.junjo.anchor.notify.GoalsNotification
@@ -96,8 +103,12 @@ import dev.junjo.anchor.notify.Notifications
 import dev.junjo.anchor.overlay.FloatingGoals
 import dev.junjo.anchor.timer.FocusTimer
 import kotlinx.coroutines.launch
+import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 
 /** Past this many open to-dos, suggest trimming: working memory holds only a handful of things. */
 private const val SOFT_LIMIT = 5
@@ -118,6 +129,7 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}, onOpenNotes: () -> Unit = {}) {
     val timer by FocusTimer.state.collectAsStateWithLifecycle()
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var editingGoalId by rememberSaveable { mutableStateOf<String?>(null) }
+    var remindGoalId by rememberSaveable { mutableStateOf<String?>(null) }
     var editingNoteId by rememberSaveable { mutableStateOf<String?>(null) }
     var editingReminderId by rememberSaveable { mutableStateOf<String?>(null) }
     var showDone by rememberSaveable { mutableStateOf(false) }
@@ -167,8 +179,9 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}, onOpenNotes: () -> Unit = {}) {
 
     // Derived lists are rebuilt only when the data behind them changes, not on every redraw.
     val active = remember(goals) { goals.active() }
-    val carried = remember(active, today) { active.filter { it.day < today } }
-    val current = remember(active, today) { active.filter { it.day >= today } }
+    val stale = remember(active, resumes) { active.stale() }
+    val staleIds = remember(stale) { stale.map { it.id }.toSet() }
+    val current = remember(active, staleIds) { active.filterNot { it.id in staleIds } }
     val comingUp = remember(allReminders, resumes) { ReminderStore.comingUp(allReminders) }
     val done = remember(goals, today) { goals.doneToday() }
     val notes = remember(allNotes) { allNotes.visible() }
@@ -235,25 +248,26 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}, onOpenNotes: () -> Unit = {}) {
                 )
             }
 
-            if (carried.isNotEmpty()) {
-                item(key = "carried") {
-                    CarriedOverCard(
-                        carried,
+            if (stale.isNotEmpty()) {
+                item(key = "stale") {
+                    StillOnCard(
+                        stale,
                         modifier = Modifier.animateItem().padding(bottom = 16.dp),
-                        onKeep = { GoalStore.keepForToday(it.id) },
+                        onKeep = { GoalStore.keep(it.id) },
                         onDrop = { remove(it) },
-                        onKeepAll = { GoalStore.keepAllForToday() },
+                        onKeepAll = { GoalStore.keepAll() },
                     )
                 }
             }
 
-            if (current.isEmpty() && carried.isEmpty() && comingUp.isEmpty() && notes.isEmpty()) {
+            if (current.isEmpty() && stale.isEmpty() && comingUp.isEmpty() && notes.isEmpty()) {
                 item(key = "empty") { EmptyState(Modifier.animateItem()) }
             }
 
             itemsIndexed(current, key = { _, g -> g.id }) { i, goal ->
                 GoalRow(
                     goal,
+                    refresh = resumes,
                     shape = segmentShape(i, current.size),
                     modifier = Modifier.animateItem(),
                     onDone = { complete(goal) },
@@ -335,28 +349,65 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}, onOpenNotes: () -> Unit = {}) {
     val editingGoal = editingGoalId?.let { id -> goals.firstOrNull { it.id == id && it.isActive } }
     editingGoal?.let { goal ->
         val canPutFirst = active.size > 1 && active.firstOrNull()?.id != goal.id
+        val extras = buildList {
+            if (canPutFirst) {
+                add(
+                    SheetAction("Put first") { text ->
+                        if (text.trim() != goal.text) GoalStore.rename(goal.id, text)
+                        GoalStore.putFirst(goal.id)
+                        editingGoalId = null
+                    },
+                )
+            }
+            add(
+                SheetAction("In&Out") { text ->
+                    if (text.trim() != goal.text) GoalStore.rename(goal.id, text)
+                    editingGoalId = null
+                    QuickAddActivity.open(ctx, QuickAddActivity.Kind.TRIP, text.trim())
+                },
+            )
+        }
         key(goal.id) {
             EditSheet(
                 initial = goal.text,
                 multiLine = false,
                 otherLabel = "Remind me…",
                 onOther = { text ->
-                    GoalStore.rename(goal.id, text)
+                    if (text.trim() != goal.text) GoalStore.rename(goal.id, text)
                     editingGoalId = null
-                    QuickAddActivity.open(ctx, QuickAddActivity.Kind.REMIND, text.trim())
+                    remindGoalId = goal.id
                 },
-                extraLabel = if (canPutFirst) "Put first" else null,
-                onExtra = if (canPutFirst) {
-                    { text ->
-                        if (text.trim() != goal.text) GoalStore.rename(goal.id, text)
-                        GoalStore.putFirst(goal.id)
-                        editingGoalId = null
-                    }
-                } else null,
+                extraActions = extras,
                 onDelete = { editingGoalId = null; remove(goal) },
                 onClose = { text ->
                     if (text.trim() != goal.text) GoalStore.rename(goal.id, text)
                     editingGoalId = null
+                },
+            )
+        }
+    }
+
+    val remindGoal = remindGoalId?.let { id -> goals.firstOrNull { it.id == id && it.isActive } }
+    remindGoal?.let { goal ->
+        key(goal.id) {
+            HideAndRemindSheet(
+                goal = goal,
+                onDismiss = { remindGoalId = null },
+                onSaved = { reminder, keepOnList ->
+                    remindGoalId = null
+                    if (keepOnList) {
+                        offerUndo("Reminder set for ${whenText(reminder.startAt)}") {
+                            ReminderStore.delete(reminder.id)
+                        }
+                    } else {
+                        GoalStore.delete(goal.id)
+                        val timeText = comingUpTimeText(reminder.startAt)
+                        val backLabel = if (timeText.startsWith("tomorrow")) "Back $timeText" else "Back at $timeText"
+                        offerUndo(backLabel) {
+                            GoalStore.restore(goal.id)
+                            ReminderStore.delete(reminder.id)
+                        }
+                    }
                 },
             )
         }
@@ -539,12 +590,16 @@ private fun EmptyState(modifier: Modifier = Modifier) {
 @Composable
 private fun GoalRow(
     goal: Goal,
+    refresh: Int,
     shape: androidx.compose.ui.graphics.Shape,
     modifier: Modifier,
     onDone: () -> Unit,
     onFocus: () -> Unit,
     onEdit: () -> Unit,
 ) {
+    val routineLabel = remember(goal.reminderId, goal.firedAt, refresh) {
+        if (goal.reminderId != null && goal.firedAt != null) sinceLabel(goal.firedAt) else null
+    }
     Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainer, modifier = modifier.fillMaxWidth()) {
         Row(
             Modifier
@@ -559,11 +614,17 @@ private fun GoalRow(
                 modifier = Modifier.size(26.dp),
             )
             Spacer(Modifier.width(14.dp))
-            Text(
-                goal.text,
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.weight(1f).padding(vertical = 18.dp),
-            )
+            Column(Modifier.weight(1f).padding(vertical = if (routineLabel != null) 12.dp else 18.dp)) {
+                Text(goal.text, style = MaterialTheme.typography.bodyLarge)
+                if (routineLabel != null) {
+                    val overdue = routineLabel.startsWith("since ")
+                    Text(
+                        "🔁 $routineLabel",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (overdue) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             IconButton(onClick = onFocus, shapes = IconButtonDefaults.shapes()) {
                 Icon(painterResource(R.drawable.ic_play), "Focus on this", tint = MaterialTheme.colorScheme.primary)
             }
@@ -637,10 +698,10 @@ private fun DoneRow(goal: Goal, shape: androidx.compose.ui.graphics.Shape, modif
     }
 }
 
-/** Unfinished to-dos asking for a keep-or-drop decision. */
+/** Untouched to-dos (3+ days) asking for a keep-or-drop decision. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun CarriedOverCard(
+private fun StillOnCard(
     goals: List<Goal>,
     modifier: Modifier,
     onKeep: (Goal) -> Unit,
@@ -665,6 +726,115 @@ private fun CarriedOverCard(
             if (goals.size > 1) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     FilledTonalButton(onClick = onKeepAll, shapes = ButtonDefaults.shapes()) { Text("Keep all") }
+                }
+            }
+        }
+    }
+}
+
+private val HIDE_REMIND_PRESETS = listOf(10, 30, 60, 120)
+
+/**
+ * "Remind me…" from a to-do: picks when it should come back and hides the to-do until then
+ * (moving it down into Coming up) unless "Keep it on my list too" is switched on.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun HideAndRemindSheet(
+    goal: Goal,
+    onDismiss: () -> Unit,
+    onSaved: (reminder: Reminder, keepOnList: Boolean) -> Unit,
+) {
+    var inMinutes by rememberSaveable { mutableIntStateOf(30) }
+    var atHour by rememberSaveable { mutableIntStateOf(-1) }
+    var atMinute by rememberSaveable { mutableIntStateOf(0) }
+    var alarm by rememberSaveable { mutableStateOf(true) }
+    var keepOnList by rememberSaveable { mutableStateOf(false) }
+    var picking by rememberSaveable { mutableStateOf(false) }
+    val now = rememberNow(active = true, periodMs = 15_000L)
+
+    fun targetAt(base: Long = System.currentTimeMillis()): Long =
+        if (atHour >= 0) Reminder.nextOccurrence(atHour, atMinute, Instant.ofEpochMilli(base).atZone(ZoneId.systemDefault()))
+        else base + inMinutes * 60_000L
+
+    if (picking) {
+        RemindWhenDialog(
+            initialMinutes = inMinutes,
+            initialHour = atHour.takeIf { it >= 0 },
+            initialMinute = atMinute,
+            defaultToClock = atHour >= 0 || inMinutes in HIDE_REMIND_PRESETS,
+            onDismiss = { picking = false },
+            onPickClock = { h, m -> atHour = h; atMinute = m; picking = false },
+            onPickDuration = { m -> atHour = -1; inMinutes = m; picking = false },
+        )
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(Modifier.padding(horizontal = 24.dp).navigationBarsPadding().padding(bottom = 16.dp)) {
+            Text(
+                goal.text,
+                style = MaterialTheme.typography.titleLargeEmphasized,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(14.dp))
+            val pickedClockLabel = if (atHour >= 0) {
+                LocalTime.of(atHour, atMinute).format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT))
+            } else null
+            DurationRow(
+                HIDE_REMIND_PRESETS,
+                inMinutes,
+                onSelect = { atHour = -1; inMinutes = it },
+                onOther = { picking = true },
+                prefix = "In ",
+                customLabel = pickedClockLabel,
+                otherIcon = R.drawable.ic_schedule,
+                otherDescription = "Pick a time",
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(
+                Modifier.fillMaxWidth().clickable { keepOnList = !keepOnList }.padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Keep it on my list too", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "Off: hides it until then (it waits under Coming up).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Switch(checked = keepOnList, onCheckedChange = { keepOnList = it })
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                FilledTonalIconToggleButton(
+                    checked = !alarm,
+                    onCheckedChange = { muted -> alarm = !muted },
+                    shapes = IconButtonDefaults.toggleableShapes(),
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Icon(
+                        painterResource(R.drawable.ic_bell_off),
+                        contentDescription = if (alarm) "Silence reminder" else "Ring like an alarm",
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                Button(
+                    onClick = {
+                        val reminder = Reminder.once(goal.text, targetAt(), alarm)
+                        ReminderStore.save(reminder)
+                        onSaved(reminder, keepOnList)
+                    },
+                    shapes = ButtonDefaults.shapes(),
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
+                    val target = targetAt(now)
+                    val isTomorrow = Instant.ofEpochMilli(target).atZone(ZoneId.systemDefault()).toLocalDate()
+                        .isAfter(LocalDate.now(ZoneId.systemDefault()))
+                    val whenLabel = if (isTomorrow) "tomorrow ${clockTime(target)}" else "at ${clockTime(target)}"
+                    Text(if (alarm) "Ring $whenLabel" else "Remind $whenLabel")
                 }
             }
         }

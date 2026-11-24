@@ -898,7 +898,7 @@ private fun Pill(active: List<Goal>, timer: FocusTimer.State, touch: Modifier) {
                     )
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        top.text,
+                        if (top.reminderId != null) "🔁 ${top.text}" else top.text,
                         style = MaterialTheme.typography.titleSmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

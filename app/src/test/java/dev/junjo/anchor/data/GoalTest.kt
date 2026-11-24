@@ -11,10 +11,13 @@ class GoalTest {
         id: String,
         day: String = "2026-11-14",
         createdAt: Long = 0,
+        updatedAt: Long = createdAt,
         doneAt: Long? = null,
         deleted: Boolean = false,
         pinnedAt: Long? = null,
-    ) = Goal(id, "Goal $id", day, createdAt, createdAt, doneAt, deleted, pinnedAt)
+        reminderId: String? = null,
+        firedAt: Long? = null,
+    ) = Goal(id, "Goal $id", day, createdAt, updatedAt, doneAt, deleted, pinnedAt, reminderId, firedAt)
 
     private fun ms(text: String) = at(ROME, text).toInstant().toEpochMilli()
 
@@ -59,9 +62,35 @@ class GoalTest {
         assertEquals(listOf("noon", "midnight"), goals.doneToday(startOfDay = midnight).map { it.id })
     }
 
+    @Test fun staleAfterThreeDaysUntouchedNeverPinnedOrRoutine() {
+        val now = 10L * 24 * 60 * 60 * 1000
+        val goals = listOf(
+            goal("exact-3d", updatedAt = now - STALE_MS),
+            goal("just-under", updatedAt = now - STALE_MS + 1),
+            goal("pinned", updatedAt = now - STALE_MS * 2, pinnedAt = 1),
+            goal("routine", updatedAt = now - STALE_MS * 2, reminderId = "r1", firedAt = 1),
+            goal("done", updatedAt = now - STALE_MS * 2, doneAt = now),
+            goal("deleted", updatedAt = now - STALE_MS * 2, deleted = true),
+        )
+        assertEquals(listOf("exact-3d"), goals.stale(now).map { it.id })
+        // Touching updatedAt (what keep() does) resets the 3-day window.
+        val kept = listOf(goal("exact-3d", updatedAt = now))
+        assertEquals(emptyList<Goal>(), kept.stale(now + STALE_MS - 1))
+        assertEquals(listOf("exact-3d"), kept.stale(now + STALE_MS).map { it.id })
+    }
+
     @Test fun jsonRoundTrip() {
-        for (g in listOf(goal("a", doneAt = 42), goal("b", pinnedAt = 99), goal("c", deleted = true))) {
+        val cases = listOf(
+            goal("a", doneAt = 42),
+            goal("b", pinnedAt = 99),
+            goal("c", deleted = true),
+            goal("d", reminderId = "r1", firedAt = 123_456),
+        )
+        for (g in cases) {
             assertEquals(g, Goal.fromJson(JSONObject(g.toJson().toString())))
         }
+        // A v0.5.2 JSON entry without reminderId or firedAt loads with nulls.
+        val legacy = JSONObject("""{"id":"old","text":"Call Sam","day":"2026-11-22","createdAt":10,"updatedAt":20,"deleted":false}""")
+        assertEquals(Goal("old", "Call Sam", "2026-11-22", 10, 20), Goal.fromJson(legacy))
     }
 }

@@ -11,6 +11,7 @@ import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.core.content.edit
 import dev.junjo.anchor.R
+import dev.junjo.anchor.data.Goal
 import dev.junjo.anchor.data.GoalStore
 import dev.junjo.anchor.data.Reminder
 import dev.junjo.anchor.data.ReminderStore
@@ -149,6 +150,26 @@ object Reminders {
         _ringing.update { it - id }
     }
 
+    /** What to do with the to-do list when a routine reminder goes off. */
+    internal sealed class Occurrence {
+        data class Create(val reminderId: String, val firedAt: Long) : Occurrence()
+        data class Reuse(val goalId: String, val attachReminderId: String?, val attachFiredAt: Long?) : Occurrence()
+    }
+
+    /**
+     * Pure decision for a routine firing at [now]:
+     * - An open to-do already tied to [reminderId] is reused, keeping its original (oldest) [firedAt].
+     * - Otherwise an open to-do with matching text and no [reminderId] is reused and tagged.
+     * - Otherwise a new to-do is created with [reminderId] and [firedAt] = [now].
+     */
+    internal fun resolveOccurrence(active: List<Goal>, reminderId: String, text: String, now: Long): Occurrence {
+        val byId = active.firstOrNull { it.reminderId == reminderId }
+        if (byId != null) return Occurrence.Reuse(byId.id, attachReminderId = null, attachFiredAt = null)
+        val byText = active.firstOrNull { it.reminderId == null && it.text.equals(text, ignoreCase = true) }
+        if (byText != null) return Occurrence.Reuse(byText.id, attachReminderId = reminderId, attachFiredAt = now)
+        return Occurrence.Create(reminderId, firedAt = now)
+    }
+
     private fun fire(ctx: Context, id: String, snoozed: Boolean, goalId: String?) {
         if (snoozed) clearSnooze(ctx, id)
         val r = ReminderStore.find(id) ?: return
@@ -157,13 +178,28 @@ object Reminders {
         if (!snoozed) {
             schedule(ctx, r) // The next one.
             if (r.addAsGoal) {
-                val existing = GoalStore.goals.value.active().firstOrNull { it.text.equals(r.text, ignoreCase = true) }
-                // Push reminder goals to the top so they surface on the bubble pill and notification immediately.
-                goal = if (existing != null) {
-                    GoalStore.putFirst(existing.id)
-                    existing.id
+                val now = System.currentTimeMillis()
+                val active = GoalStore.goals.value.active()
+                goal = if (!r.once) {
+                    when (val decision = resolveOccurrence(active, r.id, r.text, now)) {
+                        is Occurrence.Create -> GoalStore.addFromRoutine(r.text, decision.reminderId, decision.firedAt)?.id
+                        is Occurrence.Reuse -> {
+                            if (decision.attachReminderId != null && decision.attachFiredAt != null) {
+                                GoalStore.attachRoutine(decision.goalId, decision.attachReminderId, decision.attachFiredAt)
+                            } else {
+                                GoalStore.putFirst(decision.goalId)
+                            }
+                            decision.goalId
+                        }
+                    }
                 } else {
-                    GoalStore.add(r.text, putFirst = true)?.id
+                    val existing = active.firstOrNull { it.text.equals(r.text, ignoreCase = true) }
+                    if (existing != null) {
+                        GoalStore.putFirst(existing.id)
+                        existing.id
+                    } else {
+                        GoalStore.add(r.text, putFirst = true)?.id
+                    }
                 }
             }
         }
