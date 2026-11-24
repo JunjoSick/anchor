@@ -1,37 +1,14 @@
 package dev.junjo.anchor.ui
 
-import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.material3.FloatingActionButtonMenu
-import androidx.compose.material3.FloatingActionButtonMenuItem
-import androidx.compose.material3.ToggleFloatingActionButton
-import androidx.compose.runtime.key
-import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.text.style.TextOverflow
-import dev.junjo.anchor.data.Note
-import dev.junjo.anchor.data.NoteStore
-import dev.junjo.anchor.data.visible
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 import android.Manifest
-import android.annotation.SuppressLint
-import android.app.NotificationManager
-import android.app.StatusBarManager
-import android.content.ComponentName
-import android.content.Context
-import android.content.Intent
-import android.graphics.drawable.Icon as SystemIcon
-import android.net.Uri
 import android.os.Build
-import android.os.PowerManager
-import android.provider.Settings
 import android.view.HapticFeedbackConstants
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,37 +18,45 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FloatingActionButtonMenu
+import androidx.compose.material3.FloatingActionButtonMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LargeFlexibleTopAppBar
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.ToggleFloatingActionButton
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -81,58 +66,60 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.junjo.anchor.AppPrefs
 import dev.junjo.anchor.QuickAddActivity
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.rememberModalBottomSheetState
-import dev.junjo.anchor.QuickAddTileService
-import dev.junjo.anchor.NoteTileService
-import dev.junjo.anchor.TripTileService
 import dev.junjo.anchor.R
-import dev.junjo.anchor.data.Backup
 import dev.junjo.anchor.data.Goal
 import dev.junjo.anchor.data.GoalStore
+import dev.junjo.anchor.data.NoteStore
+import dev.junjo.anchor.data.Reminder
+import dev.junjo.anchor.data.ReminderStore
 import dev.junjo.anchor.data.active
 import dev.junjo.anchor.data.doneToday
 import dev.junjo.anchor.data.today
+import dev.junjo.anchor.data.visible
 import dev.junjo.anchor.notify.GoalsNotification
 import dev.junjo.anchor.notify.Notifications
 import dev.junjo.anchor.overlay.FloatingGoals
 import dev.junjo.anchor.timer.FocusTimer
-import dev.junjo.anchor.widget.Widgets
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
-/** Past this many open goals, suggest trimming: working memory holds only a handful of things. */
+/** Past this many open to-dos, suggest trimming: working memory holds only a handful of things. */
 private const val SOFT_LIMIT = 5
+
+/** How many notes show on the main screen before "All notes". */
+private const val HOME_NOTES_LIMIT = 3
 
 private val DONE_MESSAGES = listOf("Done ✓", "Nice, that's done", "Ticked off ✓", "One less thing to hold in your head")
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun HomeScreen(onOpenReminders: () -> Unit = {}) {
+fun HomeScreen(onOpenReminders: () -> Unit = {}, onOpenNotes: () -> Unit = {}) {
     val ctx = LocalContext.current
     val view = LocalView.current
     val goals by GoalStore.goals.collectAsStateWithLifecycle()
     val allNotes by NoteStore.notes.collectAsStateWithLifecycle()
+    val allReminders by ReminderStore.reminders.collectAsStateWithLifecycle()
     val timer by FocusTimer.state.collectAsStateWithLifecycle()
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var editingGoalId by rememberSaveable { mutableStateOf<String?>(null) }
     var editingNoteId by rememberSaveable { mutableStateOf<String?>(null) }
+    var editingReminderId by rememberSaveable { mutableStateOf<String?>(null) }
     var showDone by rememberSaveable { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -182,8 +169,10 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}) {
     val active = remember(goals) { goals.active() }
     val carried = remember(active, today) { active.filter { it.day < today } }
     val current = remember(active, today) { active.filter { it.day >= today } }
+    val comingUp = remember(allReminders, resumes) { ReminderStore.comingUp(allReminders) }
     val done = remember(goals, today) { goals.doneToday() }
     val notes = remember(allNotes) { allNotes.visible() }
+    val shownNotes = remember(notes) { notes.take(HOME_NOTES_LIMIT) }
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val listState = rememberLazyListState()
@@ -258,7 +247,7 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}) {
                 }
             }
 
-            if (current.isEmpty() && carried.isEmpty() && notes.isEmpty()) {
+            if (current.isEmpty() && carried.isEmpty() && comingUp.isEmpty() && notes.isEmpty()) {
                 item(key = "empty") { EmptyState(Modifier.animateItem()) }
             }
 
@@ -287,10 +276,33 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}) {
                 }
             }
 
+            if (comingUp.isNotEmpty()) {
+                item(key = "coming-up-header") { SectionHeader("Coming up", Modifier.animateItem()) }
+                itemsIndexed(comingUp, key = { _, r -> "coming-${r.id}" }) { i, r ->
+                    ComingUpRow(r, segmentShape(i, comingUp.size), Modifier.animateItem()) {
+                        editingReminderId = r.id
+                    }
+                }
+            }
+
             if (notes.isNotEmpty()) {
-                item(key = "notes-header") { SectionHeader("Notes", Modifier.animateItem()) }
-                itemsIndexed(notes, key = { _, n -> n.id }) { i, note ->
-                    NoteRow(note, segmentShape(i, notes.size), Modifier.animateItem()) { editingNoteId = note.id }
+                item(key = "notes-header") {
+                    Row(
+                        Modifier.fillMaxWidth().animateItem(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        SectionHeader("Notes", Modifier.weight(1f))
+                        if (notes.size > HOME_NOTES_LIMIT) {
+                            TextButton(
+                                onClick = onOpenNotes,
+                                shapes = ButtonDefaults.shapes(),
+                                modifier = Modifier.padding(top = 14.dp),
+                            ) { Text("All notes (${notes.size})") }
+                        }
+                    }
+                }
+                itemsIndexed(shownNotes, key = { _, n -> n.id }) { i, note ->
+                    NoteRow(note, segmentShape(i, shownNotes.size), Modifier.animateItem()) { editingNoteId = note.id }
                 }
             }
 
@@ -379,6 +391,13 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}) {
         }
     }
 
+    val editingReminder = editingReminderId?.let { id -> allReminders.firstOrNull { it.id == id && !it.deleted } }
+    editingReminder?.let { reminder ->
+        key(reminder.id) {
+            ReminderSheet(initial = reminder, onDismiss = { editingReminderId = null })
+        }
+    }
+
     if (settingsOpen) {
         ModalBottomSheet(onDismissRequest = { settingsOpen = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).navigationBarsPadding().padding(bottom = 16.dp)) {
@@ -399,8 +418,8 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}) {
 }
 
 /**
- * The + button. One tap opens the four ways to catch something, each its own small sheet, so you
- * pick what it is once and never switch modes while typing.
+ * The + button. One tap opens the ways to catch something, each its own small sheet (folded into
+ * one add sheet in phase 4).
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -456,10 +475,16 @@ private fun AddMenu() {
 /** A quiet heading over a group of rows; with [onClick] it folds the group away. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun SectionHeader(text: String, modifier: Modifier = Modifier, expanded: Boolean = true, onClick: (() -> Unit)? = null) {
+internal fun SectionHeader(
+    text: String,
+    modifier: Modifier = Modifier,
+    expanded: Boolean = true,
+    topPadding: Dp = 20.dp,
+    onClick: (() -> Unit)? = null,
+) {
     Row(
         modifier
-            .padding(top = 20.dp, bottom = 6.dp)
+            .padding(top = topPadding, bottom = 6.dp)
             .clip(RoundedCornerShape(12.dp))
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 8.dp, vertical = 4.dp),
@@ -546,17 +571,36 @@ private fun GoalRow(
     }
 }
 
-/** Notes sit under the goals, quieter: no circle, since there's nothing to tick off. */
+/** One-off reminders due in the next 24 hours: quieter than active to-dos, tap to edit. */
 @Composable
-private fun NoteRow(note: Note, shape: androidx.compose.ui.graphics.Shape, modifier: Modifier, onOpen: () -> Unit) {
+private fun ComingUpRow(reminder: Reminder, shape: androidx.compose.ui.graphics.Shape, modifier: Modifier, onOpen: () -> Unit) {
     Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = modifier.fillMaxWidth()) {
-        Text(
-            note.text,
-            style = MaterialTheme.typography.bodyLarge,
-            maxLines = 4,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.clickable(onClick = onOpen).padding(horizontal = 20.dp, vertical = 14.dp).fillMaxWidth(),
-        )
+        Row(
+            Modifier.clickable(onClick = onOpen).padding(horizontal = 18.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                painterResource(if (reminder.alarm) R.drawable.ic_bell_ring else R.drawable.ic_bell),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                reminder.text,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                comingUpTimeText(reminder.startAt),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -593,7 +637,7 @@ private fun DoneRow(goal: Goal, shape: androidx.compose.ui.graphics.Shape, modif
     }
 }
 
-/** Unfinished goals from earlier days ask for a decision once, instead of piling up silently. */
+/** Unfinished to-dos asking for a keep-or-drop decision. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun CarriedOverCard(
@@ -625,225 +669,4 @@ private fun CarriedOverCard(
             }
         }
     }
-}
-
-private class SetupItem(val title: String, val why: String, val button: String, val fix: () -> Unit)
-
-/** One-time checklist for the Android settings the app needs to work well. Disappears when done. */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun SetupCard(refresh: Int, modifier: Modifier, onWidgetUnsupported: () -> Unit) {
-    val ctx = LocalContext.current
-    var hidden by remember(refresh) { mutableStateOf(AppPrefs.setupHidden(ctx)) }
-    val items = remember(refresh) { setupItems(ctx, onWidgetUnsupported) }
-    if (hidden || items.isEmpty()) return
-
-    Surface(
-        modifier.fillMaxWidth().padding(bottom = 16.dp),
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer,
-    ) {
-        Column(Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Setup", style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.weight(1f))
-                TextButton(onClick = { AppPrefs.setSetupHidden(ctx, true); hidden = true }, shapes = ButtonDefaults.shapes()) {
-                    Text("Hide")
-                }
-            }
-            items.forEach { item ->
-                Row(Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(item.title, style = MaterialTheme.typography.titleSmall)
-                        Text(item.why, style = MaterialTheme.typography.bodySmall)
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    FilledTonalButton(onClick = item.fix, shapes = ButtonDefaults.shapes()) { Text(item.button) }
-                }
-            }
-        }
-    }
-}
-
-@SuppressLint("BatteryLife")
-private fun setupItems(ctx: Context, onWidgetUnsupported: () -> Unit): List<SetupItem> = buildList {
-    val pkg = ctx.packageName
-    fun open(intent: Intent) = runCatching { ctx.startActivity(intent) }
-
-    if (!Notifications.canPost(ctx)) add(
-        SetupItem("Allow notifications", "Timers, alarms and your list on the lock screen need them.", "Allow") {
-            open(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, pkg))
-        },
-    )
-    if (Build.VERSION.SDK_INT >= 34 && !ctx.getSystemService(NotificationManager::class.java).canUseFullScreenIntent()) add(
-        SetupItem("Allow full-screen alarms", "So “time's up” fills the screen even when the phone is locked.", "Allow") {
-            open(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$pkg")))
-        },
-    )
-    if (Build.VERSION.SDK_INT >= 36 && Notifications.canPost(ctx) &&
-        !NotificationManagerCompat.from(ctx).canPostPromotedNotifications()
-    ) add(
-        SetupItem("Show timers as Live Updates", "The countdown sits in the status bar and on top of your notifications.", "Allow") {
-            open(Intent(Settings.ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, pkg))
-        },
-    )
-    if (!FloatingGoals.isOn(ctx)) add(
-        SetupItem("Keep your list floating on screen", "A small bubble over every app shows your top to-do and the timer.", "Turn on") {
-            FloatingGoals.enable(ctx)
-        },
-    )
-    if (!Widgets.isPlaced(ctx)) add(
-        SetupItem("Put your list on the home screen", "A widget keeps them in sight, so you don't have to remember to look.", "Add") {
-            if (!Widgets.requestPin(ctx)) onWidgetUnsupported()
-        },
-    )
-    if (!ctx.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(pkg)) add(
-        SetupItem("Keep timers on time", "Lets timers and the bubble keep running when the phone tries to save battery.", "Allow") {
-            open(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$pkg")))
-        },
-    )
-}
-
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun SettingsSection(refresh: Int, onShowSetup: () -> Unit, onMessage: (String) -> Unit) {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var goalsNotification by remember { mutableStateOf(AppPrefs.goalsNotification(ctx)) }
-    var bubble by remember(refresh) { mutableStateOf(FloatingGoals.isOn(ctx)) }
-    var bubbleNudge by remember { mutableStateOf(AppPrefs.bubbleNudge(ctx)) }
-
-    val exportBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            val ok = withContext(Dispatchers.IO) {
-                runCatching {
-                    val json = Backup.exportJson()
-                    ctx.contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray(Charsets.UTF_8)) }
-                        ?: error("Could not open destination")
-                }.isSuccess
-            }
-            onMessage(if (ok) "Backup saved" else "Couldn't save backup")
-        }
-    }
-
-    val importBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val raw = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
-                        ?: error("Could not read file")
-                    Backup.importJson(raw)
-                }
-            }
-            onMessage(result.fold(onSuccess = { it.message() }, onFailure = { "Couldn't read that backup file" }))
-        }
-    }
-
-    Column(Modifier.padding(top = 8.dp)) {
-        Text(
-            "Always in sight",
-            style = MaterialTheme.typography.titleMediumEmphasized,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(start = 8.dp, bottom = 8.dp),
-        )
-        SettingRow(
-            title = "Floating bubble",
-            about = "A small pill over every app with your top to-do, or the countdown while a timer runs. Tap it for your list; drag it anywhere, or push it off the side to tuck it into the edge.",
-            checked = bubble,
-            shape = segmentShape(0, 3),
-        ) {
-            bubble = it
-            if (it) FloatingGoals.enable(ctx) else FloatingGoals.disable(ctx)
-        }
-        Spacer(Modifier.height(2.dp))
-        SettingRow(
-            title = "Nudge tucked bubble",
-            about = "Briefly flashes the tucked edge tab red every few minutes while you still have open to-dos.",
-            checked = bubbleNudge,
-            shape = segmentShape(1, 3),
-        ) {
-            bubbleNudge = it
-            AppPrefs.setBubbleNudge(ctx, it)
-        }
-        Spacer(Modifier.height(2.dp))
-        SettingRow(
-            title = "Your list in notifications",
-            about = "Shows your list on the lock screen and lets you add a to-do from the notification shade.",
-            checked = goalsNotification,
-            shape = segmentShape(2, 3),
-        ) {
-            goalsNotification = it
-            AppPrefs.setGoalsNotification(ctx, it)
-        }
-        Spacer(Modifier.height(16.dp))
-        Text(
-            "Backup",
-            style = MaterialTheme.typography.titleMediumEmphasized,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(start = 8.dp, bottom = 8.dp),
-        )
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalButton(
-                onClick = { exportBackup.launch("anchor-${today()}.json") },
-                shapes = ButtonDefaults.shapes(),
-                modifier = Modifier.weight(1f),
-            ) { Text("Export") }
-            FilledTonalButton(
-                onClick = { importBackup.launch(arrayOf("application/json", "text/plain", "*/*")) },
-                shapes = ButtonDefaults.shapes(),
-                modifier = Modifier.weight(1f),
-            ) { Text("Import") }
-        }
-        Spacer(Modifier.height(8.dp))
-        if (Build.VERSION.SDK_INT >= 33) {
-            TextButton(onClick = { requestTile(ctx, QuickAddTileService::class.java, R.string.tile_label, R.drawable.ic_add) }, shapes = ButtonDefaults.shapes()) {
-                Text("Add an “Add” button to Quick Settings")
-            }
-            TextButton(onClick = { requestTile(ctx, NoteTileService::class.java, R.string.note_tile_label, R.drawable.ic_note) }, shapes = ButtonDefaults.shapes()) {
-                Text("Add a “Note” button to Quick Settings")
-            }
-            TextButton(onClick = { requestTile(ctx, TripTileService::class.java, R.string.trip_tile_label, R.drawable.ic_trip) }, shapes = ButtonDefaults.shapes()) {
-                Text("Add an “In&Out” button to Quick Settings")
-            }
-        }
-        if (AppPrefs.setupHidden(ctx)) {
-            TextButton(onClick = { AppPrefs.setSetupHidden(ctx, false); onShowSetup() }, shapes = ButtonDefaults.shapes()) {
-                Text("Show setup checklist")
-            }
-        }
-    }
-}
-
-@Composable
-private fun SettingRow(
-    title: String,
-    about: String,
-    checked: Boolean,
-    shape: androidx.compose.ui.graphics.Shape,
-    onChange: (Boolean) -> Unit,
-) {
-    Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.clickable { onChange(!checked) }.padding(horizontal = 20.dp, vertical = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleMedium)
-                Text(about, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Spacer(Modifier.width(16.dp))
-            Switch(checked = checked, onCheckedChange = onChange)
-        }
-    }
-}
-
-@RequiresApi(33)
-private fun requestTile(ctx: Context, tile: Class<*>, label: Int, icon: Int) {
-    ctx.getSystemService(StatusBarManager::class.java).requestAddTileService(
-        ComponentName(ctx, tile),
-        ctx.getString(label),
-        SystemIcon.createWithResource(ctx, icon),
-        ctx.mainExecutor,
-    ) { }
 }

@@ -164,6 +164,8 @@ object ReminderStore {
     /** Deleted repeating reminders are kept this long before pruning, matching [GoalStore]. */
     internal const val HISTORY_MS = 90L * 24 * 60 * 60 * 1000
     internal const val ONCE_KEEP_MS = 24L * 60 * 60 * 1000
+    internal const val COMING_UP_WINDOW_MS = 24L * 60 * 60 * 1000
+    internal const val COMING_UP_LIMIT = 3
 
     private lateinit var appContext: Context
     private lateinit var file: AtomicFile
@@ -194,6 +196,12 @@ object ReminderStore {
     fun visible(list: List<Reminder> = _reminders.value, now: Long = System.currentTimeMillis()): List<Reminder> =
         list.filter { !it.deleted && !it.isPast(now) }
             .sortedWith(compareBy({ !it.once }, { if (it.once) it.startAt else 0L }, { it.hour }, { it.minute }))
+
+    /** One-off reminders due in the next 24 hours, soonest first, at most 3. */
+    fun comingUp(list: List<Reminder> = _reminders.value, now: Long = System.currentTimeMillis()): List<Reminder> =
+        list.filter { !it.deleted && it.enabled && it.once && it.startAt > now && it.startAt <= now + COMING_UP_WINDOW_MS }
+            .sortedBy { it.startAt }
+            .take(COMING_UP_LIMIT)
 
     /** Adds the reminder, or replaces the one with the same id. */
     fun save(reminder: Reminder) {

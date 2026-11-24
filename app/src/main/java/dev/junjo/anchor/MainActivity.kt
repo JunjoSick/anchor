@@ -13,6 +13,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import dev.junjo.anchor.ui.AnchorTheme
 import dev.junjo.anchor.ui.HomeScreen
+import dev.junjo.anchor.ui.NotesScreen
 import dev.junjo.anchor.ui.RemindersScreen
 
 class MainActivity : ComponentActivity() {
@@ -38,11 +39,19 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** One page, Today, with reminders behind the bell. */
+private enum class Screen { HOME, REMINDERS, NOTES }
+
+/** One screen, To-do, with Reminders behind the bell and All notes under Notes. */
 @Composable
 private fun App() {
-    var reminders by rememberSaveable { mutableStateOf(false) }
-    BackHandler(enabled = reminders) { reminders = false }
-    if (reminders) RemindersScreen(onBack = { reminders = false })
-    else HomeScreen(onOpenReminders = { reminders = true })
+    var screen by rememberSaveable { mutableStateOf(Screen.HOME) }
+    BackHandler(enabled = screen != Screen.HOME) { screen = Screen.HOME }
+    when (screen) {
+        Screen.REMINDERS -> RemindersScreen(onBack = { screen = Screen.HOME })
+        Screen.NOTES -> NotesScreen(onBack = { screen = Screen.HOME })
+        Screen.HOME -> HomeScreen(
+            onOpenReminders = { screen = Screen.REMINDERS },
+            onOpenNotes = { screen = Screen.NOTES },
+        )
+    }
 }

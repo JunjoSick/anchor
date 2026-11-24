@@ -24,16 +24,15 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -62,34 +61,28 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.junjo.anchor.R
+import dev.junjo.anchor.clockTime
 import dev.junjo.anchor.data.Reminder
 import dev.junjo.anchor.data.ReminderStore
-import dev.junjo.anchor.clockTime
 import dev.junjo.anchor.reminders.Reminders
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 
-/** The list of reminders: one-offs still to come first, then the repeating ones. */
+private val ONCE_PRESETS = listOf(10, 30, 60, 120)
+
+private enum class ScheduleMode { ONCE, DAYS, EVERY }
+
+/** Renders one section of reminders (either Once or Routines). */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
-fun LazyListScope.remindersSection(
+fun LazyListScope.reminderGroup(
     reminders: List<Reminder>,
     refresh: Int = 0,
     onEdit: (Reminder) -> Unit,
 ) {
-    if (reminders.isEmpty()) {
-        item(key = "reminders-empty") {
-            Text(
-                "Once: a call in 40 minutes. Routines: meds, water, bedtime. " +
-                    "When one goes off it lands on your list until you tick it off.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.animateItem().padding(horizontal = 8.dp),
-            )
-        }
-    }
     itemsIndexed(reminders, key = { _, r -> "reminder-${r.id}" }) { i, r ->
         ReminderRow(r, segmentShape(i, reminders.size), refresh, Modifier.animateItem(), onEdit = { onEdit(r) })
     }
@@ -99,50 +92,46 @@ fun LazyListScope.remindersSection(
 @Composable
 private fun ReminderRow(r: Reminder, shape: androidx.compose.ui.graphics.Shape, refresh: Int, modifier: Modifier, onEdit: () -> Unit) {
     val dim = if (r.enabled) 1f else 0.5f
-    val headline = remember(r, refresh) {
+    val nextLabel = remember(r, refresh) {
         when {
             r.once -> whenText(r.startAt)
-            r.repeatsByInterval -> Reminders.next(r)?.let { "Next ${whenText(it)}" } ?: r.timeText
-            else -> r.timeText
+            else -> Reminders.next(r)?.let { "Next ${whenText(it)}" } ?: r.timeText
         }
     }
     Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainer, modifier = modifier.fillMaxWidth()) {
         Row(
-            Modifier.clickable(enabled = !r.once, onClick = onEdit).padding(start = 20.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+            Modifier.clickable(onClick = onEdit).padding(start = 20.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        headline,
-                        style = MaterialTheme.typography.headlineSmallEmphasized,
+                        r.text,
+                        style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = dim),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
                     )
                     if (r.alarm) {
                         Spacer(Modifier.width(8.dp))
                         Icon(
-                            painterResource(R.drawable.ic_bell),
+                            painterResource(R.drawable.ic_bell_ring),
                             contentDescription = "Rings like an alarm",
                             tint = MaterialTheme.colorScheme.tertiary.copy(alpha = dim),
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(18.dp),
                         )
                     }
                 }
                 Text(
-                    r.text,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = dim),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    r.daysText,
+                    if (r.once) nextLabel else "$nextLabel · ${r.daysText}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = dim),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Spacer(Modifier.width(12.dp))
-            // A one-off has nothing to switch off for later: it's either coming, or cancelled.
             if (r.once) {
                 TextButton(onClick = { ReminderStore.delete(r.id) }, shapes = ButtonDefaults.shapes()) { Text("Cancel") }
             } else {
@@ -152,44 +141,106 @@ private fun ReminderRow(r: Reminder, shape: androidx.compose.ui.graphics.Shape, 
     }
 }
 
-/** Add or edit a reminder. [initial] is null for a new one. */
+/**
+ * One sheet for creating or editing any reminder: Once, On days, or Every….
+ * [initial] is null for a new reminder; [initialText] optionally prefills the name.
+ */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun ReminderSheet(initial: Reminder?, onDismiss: () -> Unit) {
+fun ReminderSheet(
+    initial: Reminder?,
+    onDismiss: () -> Unit,
+    initialText: String = "",
+    startOnRepeat: Boolean = false,
+) {
     val ctx = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val defaultTime = remember { LocalTime.now().plusHours(1).withMinute(0) }
 
-    var text by rememberSaveable { mutableStateOf(initial?.text ?: "") }
-    var days by rememberSaveable { mutableIntStateOf(initial?.days ?: Reminder.ALL_DAYS) }
+    val initialMode = when {
+        initial == null -> if (startOnRepeat) ScheduleMode.DAYS else ScheduleMode.ONCE
+        initial.once -> ScheduleMode.ONCE
+        initial.repeatsByInterval -> ScheduleMode.EVERY
+        else -> ScheduleMode.DAYS
+    }
+    var mode by rememberSaveable { mutableStateOf(initialMode) }
+    var text by rememberSaveable { mutableStateOf(initial?.text ?: initialText) }
+    var days by rememberSaveable {
+        mutableIntStateOf(initial?.takeIf { !it.once && !it.repeatsByInterval }?.days ?: Reminder.ALL_DAYS)
+    }
     var addAsGoal by rememberSaveable { mutableStateOf(initial?.addAsGoal ?: true) }
-    var alarm by rememberSaveable { mutableStateOf(initial?.alarm ?: false) }
-    var byInterval by rememberSaveable { mutableStateOf(initial?.repeatsByInterval ?: false) }
+    // New one-offs ring by default; new routines default quiet; existing reminders keep their setting.
+    var alarm by rememberSaveable { mutableStateOf(initial?.alarm ?: (initialMode == ScheduleMode.ONCE)) }
     var everyDays by rememberSaveable {
         mutableIntStateOf(initial?.takeIf { it.repeatsByInterval }?.let { it.everyMinutes / Reminder.DAY_MINUTES } ?: 2)
     }
     var everyHours by rememberSaveable {
         mutableIntStateOf(initial?.takeIf { it.repeatsByInterval }?.let { (it.everyMinutes % Reminder.DAY_MINUTES) / 60 } ?: 0)
     }
+
+    // For Once mode: relative minutes (inMinutes) or explicit clock time (atHour >= 0).
+    var inMinutes by rememberSaveable { mutableIntStateOf(30) }
+    var atHour by rememberSaveable {
+        mutableIntStateOf(
+            if (initial != null && initial.once) {
+                Instant.ofEpochMilli(initial.startAt).atZone(ZoneId.systemDefault()).hour
+            } else -1,
+        )
+    }
+    var atMinute by rememberSaveable {
+        mutableIntStateOf(
+            if (initial != null && initial.once) {
+                Instant.ofEpochMilli(initial.startAt).atZone(ZoneId.systemDefault()).minute
+            } else 0,
+        )
+    }
+    var pickingOnce by rememberSaveable { mutableStateOf(false) }
+
     val time = rememberTimePickerState(
         initialHour = initial?.hour ?: defaultTime.hour,
         initialMinute = initial?.minute ?: defaultTime.minute,
         is24Hour = DateFormat.is24HourFormat(ctx),
     )
-    val everyMinutes = if (byInterval) everyDays * Reminder.DAY_MINUTES + everyHours * 60 else 0
-    val canSave = text.isNotBlank() && if (byInterval) everyMinutes > 0 else days != 0
+    val now = rememberNow(active = mode == ScheduleMode.ONCE, periodMs = 15_000L)
+
+    fun onceTarget(base: Long = System.currentTimeMillis()): Long =
+        if (atHour >= 0) Reminder.nextOccurrence(atHour, atMinute, Instant.ofEpochMilli(base).atZone(ZoneId.systemDefault()))
+        else base + inMinutes * 60_000L
+
+    val everyMinutes = if (mode == ScheduleMode.EVERY) everyDays * Reminder.DAY_MINUTES + everyHours * 60 else 0
+    val canSave = text.isNotBlank() && when (mode) {
+        ScheduleMode.ONCE -> true
+        ScheduleMode.DAYS -> days != 0
+        ScheduleMode.EVERY -> everyMinutes > 0
+    }
 
     /** The reminder as it would be saved now. */
-    fun draft(): Reminder {
-        val base = initial ?: Reminder.new(text, time.hour, time.minute, days, addAsGoal)
-        // Editing only the text or switches keeps an interval where it was in its cycle.
-        val sameCycle = initial != null && initial.everyMinutes == everyMinutes &&
+    fun draft(base: Long = System.currentTimeMillis()): Reminder {
+        if (mode == ScheduleMode.ONCE) {
+            val target = onceTarget(base)
+            val zdt = Instant.ofEpochMilli(target).atZone(ZoneId.systemDefault())
+            val baseReminder = initial ?: Reminder.once(text, target, alarm)
+            return baseReminder.copy(
+                text = text,
+                hour = zdt.hour,
+                minute = zdt.minute,
+                days = 0,
+                enabled = true,
+                addAsGoal = addAsGoal,
+                alarm = alarm,
+                everyMinutes = 0,
+                startAt = target,
+                once = true,
+            )
+        }
+        val baseReminder = initial ?: Reminder.new(text, time.hour, time.minute, days, addAsGoal)
+        val sameCycle = initial != null && !initial.once && initial.everyMinutes == everyMinutes &&
             initial.hour == time.hour && initial.minute == time.minute
-        return base.copy(
+        return baseReminder.copy(
             text = text,
             hour = time.hour,
             minute = time.minute,
-            days = days,
+            days = if (mode == ScheduleMode.DAYS) days else 0,
             addAsGoal = addAsGoal,
             enabled = initial?.enabled ?: true,
             alarm = alarm,
@@ -199,6 +250,19 @@ fun ReminderSheet(initial: Reminder?, onDismiss: () -> Unit) {
                 sameCycle -> initial.startAt
                 else -> Reminder.intervalStart(time.hour, time.minute, everyMinutes)
             },
+            once = false,
+        )
+    }
+
+    if (pickingOnce) {
+        RemindWhenDialog(
+            initialMinutes = inMinutes,
+            initialHour = atHour.takeIf { it >= 0 },
+            initialMinute = atMinute,
+            defaultToClock = atHour >= 0 || inMinutes in ONCE_PRESETS,
+            onDismiss = { pickingOnce = false },
+            onPickClock = { h, m -> atHour = h; atMinute = m; pickingOnce = false },
+            onPickDuration = { m -> atHour = -1; inMinutes = m; pickingOnce = false },
         )
     }
 
@@ -231,45 +295,82 @@ fun ReminderSheet(initial: Reminder?, onDismiss: () -> Unit) {
             Spacer(Modifier.height(16.dp))
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 SegmentedButton(
-                    selected = !byInterval,
-                    onClick = { byInterval = false },
-                    shape = SegmentedButtonDefaults.itemShape(0, 2),
-                ) { Text("On set days") }
+                    selected = mode == ScheduleMode.ONCE,
+                    onClick = { mode = ScheduleMode.ONCE },
+                    shape = SegmentedButtonDefaults.itemShape(0, 3),
+                ) { Text("Once", maxLines = 1) }
                 SegmentedButton(
-                    selected = byInterval,
-                    onClick = { byInterval = true },
-                    shape = SegmentedButtonDefaults.itemShape(1, 2),
-                ) { Text("Every few…") }
+                    selected = mode == ScheduleMode.DAYS,
+                    onClick = { mode = ScheduleMode.DAYS },
+                    shape = SegmentedButtonDefaults.itemShape(1, 3),
+                ) { Text("On days", maxLines = 1) }
+                SegmentedButton(
+                    selected = mode == ScheduleMode.EVERY,
+                    onClick = { mode = ScheduleMode.EVERY },
+                    shape = SegmentedButtonDefaults.itemShape(2, 3),
+                ) { Text("Every…", maxLines = 1) }
             }
-            if (byInterval) {
-                Spacer(Modifier.height(16.dp))
-                Stepper("Every", everyDays, if (everyDays == 1) "day" else "days", 0..60) { everyDays = it }
-                Stepper("and", everyHours, if (everyHours == 1) "hour" else "hours", 0..23) { everyHours = it }
-            }
-            Text(
-                if (byInterval) "Starting at" else "At",
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
-            )
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { TimePicker(state = time) }
 
-            if (!byInterval) {
-                Text("Repeat on", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
-                DayPicker(days, onChange = { days = it })
-                Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(onClick = { days = Reminder.ALL_DAYS }, shapes = ButtonDefaults.shapes()) { Text("Every day") }
-                    TextButton(onClick = { days = Reminder.WEEKDAYS }, shapes = ButtonDefaults.shapes()) { Text("Weekdays") }
-                    TextButton(onClick = { days = Reminder.WEEKEND }, shapes = ButtonDefaults.shapes()) { Text("Weekends") }
-                }
-            }
-            if (canSave) {
-                Reminders.next(draft())?.let {
+            when (mode) {
+                ScheduleMode.ONCE -> {
+                    Spacer(Modifier.height(16.dp))
+                    val pickedClockLabel = if (atHour >= 0) {
+                        LocalTime.of(atHour, atMinute).format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT))
+                    } else null
+                    DurationRow(
+                        ONCE_PRESETS,
+                        inMinutes,
+                        onSelect = { atHour = -1; inMinutes = it },
+                        onOther = { pickingOnce = true },
+                        prefix = "In ",
+                        customLabel = pickedClockLabel,
+                        otherIcon = R.drawable.ic_schedule,
+                        otherDescription = "Pick a time",
+                    )
                     Text(
-                        "Next: ${whenText(it)}",
+                        "Next: ${whenText(onceTarget(now))}",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 8.dp, start = 4.dp),
+                        modifier = Modifier.padding(top = 10.dp, start = 4.dp),
                     )
+                }
+                ScheduleMode.DAYS -> {
+                    Text("At", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp))
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { TimePicker(state = time) }
+                    Text("Repeat on", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
+                    DayPicker(days, onChange = { days = it })
+                    Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = { days = Reminder.ALL_DAYS }, shapes = ButtonDefaults.shapes()) { Text("Every day") }
+                        TextButton(onClick = { days = Reminder.WEEKDAYS }, shapes = ButtonDefaults.shapes()) { Text("Weekdays") }
+                        TextButton(onClick = { days = Reminder.WEEKEND }, shapes = ButtonDefaults.shapes()) { Text("Weekends") }
+                    }
+                    if (canSave) {
+                        Reminders.next(draft())?.let {
+                            Text(
+                                "Next: ${whenText(it)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 8.dp, start = 4.dp),
+                            )
+                        }
+                    }
+                }
+                ScheduleMode.EVERY -> {
+                    Spacer(Modifier.height(16.dp))
+                    Stepper("Every", everyDays, if (everyDays == 1) "day" else "days", 0..60) { everyDays = it }
+                    Stepper("and", everyHours, if (everyHours == 1) "hour" else "hours", 0..23) { everyHours = it }
+                    Text("Starting at", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp))
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { TimePicker(state = time) }
+                    if (canSave) {
+                        Reminders.next(draft())?.let {
+                            Text(
+                                "Next: ${whenText(it)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 8.dp, start = 4.dp),
+                            )
+                        }
+                    }
                 }
             }
 
@@ -365,6 +466,14 @@ fun whenText(epochMs: Long): String {
         else -> date.format(DateTimeFormatter.ofPattern("EEE d MMM"))
     }
     return "$day ${clockTime(epochMs)}"
+}
+
+/** Compact label for Coming up rows: "18:00" if today, otherwise "tomorrow 8:00". */
+fun comingUpTimeText(epochMs: Long): String {
+    val zone = ZoneId.systemDefault()
+    val date = Instant.ofEpochMilli(epochMs).atZone(zone).toLocalDate()
+    val today = LocalDate.now(zone)
+    return if (date == today) clockTime(epochMs) else "tomorrow ${clockTime(epochMs)}"
 }
 
 /** Seven day buttons, Monday first. A picked day turns into a filled cookie. */
