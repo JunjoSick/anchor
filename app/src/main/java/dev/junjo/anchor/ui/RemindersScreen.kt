@@ -28,11 +28,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.junjo.anchor.QuickAddActivity
 import dev.junjo.anchor.R
 import dev.junjo.anchor.data.ReminderStore
 import dev.junjo.anchor.reminders.Reminders
@@ -41,6 +43,7 @@ import dev.junjo.anchor.reminders.Reminders
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun RemindersScreen(onBack: () -> Unit) {
+    val ctx = LocalContext.current
     val all by ReminderStore.reminders.collectAsStateWithLifecycle()
     // Re-checked when the screen comes back to the front, so past one-offs drop out and
     // "Next …" times stay current.
@@ -74,7 +77,7 @@ fun RemindersScreen(onBack: () -> Unit) {
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { editingId = null; sheetOpen = true }) {
+            FloatingActionButton(onClick = { QuickAddActivity.open(ctx, QuickAddActivity.Kind.REMIND) }) {
                 Icon(painterResource(R.drawable.ic_add), contentDescription = "New reminder")
             }
         },

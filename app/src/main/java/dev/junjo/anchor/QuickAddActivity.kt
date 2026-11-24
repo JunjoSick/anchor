@@ -1,17 +1,11 @@
 package dev.junjo.anchor
 
-import androidx.compose.runtime.key
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.compose.material3.FilledTonalIconToggleButton
-import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.foundation.layout.heightIn
-import dev.junjo.anchor.ui.DurationRow
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -31,6 +25,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
@@ -51,7 +46,11 @@ import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconToggleButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SplitButtonDefaults
 import androidx.compose.material3.SplitButtonLayout
@@ -65,6 +64,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -87,6 +87,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import dev.junjo.anchor.data.GoalStore
 import dev.junjo.anchor.data.NoteStore
 import dev.junjo.anchor.data.Reminder
@@ -97,7 +99,9 @@ import dev.junjo.anchor.trip.TripPolicy
 import dev.junjo.anchor.trip.Trips
 import dev.junjo.anchor.ui.AnchorTheme
 import dev.junjo.anchor.ui.DurationDialog
+import dev.junjo.anchor.ui.DurationRow
 import dev.junjo.anchor.ui.RemindWhenDialog
+import dev.junjo.anchor.ui.ReminderSheet
 import dev.junjo.anchor.ui.rememberNow
 import dev.junjo.anchor.ui.shortDuration
 import kotlinx.coroutines.delay
@@ -109,12 +113,11 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
 /**
- * Every way to add something is the same small sheet over whatever you were doing, opened from
- * the + menu, the bubble, the widget, the Quick Settings tiles and the app icon's long-press
- * menu. A thought has to be caught in seconds, before it's gone.
+ * One fast capture sheet over whatever you were doing, opened from +, the bubble, the widget,
+ * Quick Settings tiles and the app icon's shortcuts.
  *
- * Four kinds, picked before the sheet opens, so you never switch modes while typing: a goal (one
- * line, to tick off), a note (anything, kept), "remind me in…" (a one-off) and focus (a timer).
+ * Type first, then choose what to do with it: Add (to-do), Focus, In&Out, Remind me… or Note.
+ * Opened from ▶, a tile, a shortcut or the Reminders page, it starts directly in that mode.
  */
 class QuickAddActivity : ComponentActivity() {
     enum class Kind { GOAL, NOTE, REMIND, FOCUS, TRIP }
@@ -131,15 +134,36 @@ class QuickAddActivity : ComponentActivity() {
         setContent {
             AnchorTheme {
                 val r = request ?: return@AnchorTheme
-                // A new request gets its own state. Restarting the activity instead would restore
-                // the old sheet's saved state into the new one (a one-line goal field's scroll
-                // state into a multi-line note field crashes).
+                // Keyed per request so switching kinds never restores single-line scroll state into
+                // a multi-line TextField (which crashes Compose).
                 key(r.serial) {
+                    var switchedToNote by rememberSaveable { mutableStateOf(false) }
+                    var noteInitial by rememberSaveable { mutableStateOf(r.text.orEmpty()) }
+                    val showNote = r.kind == Kind.NOTE || switchedToNote
+
                     Sheet(onClose = { finish() }) {
-                        when (r.kind) {
-                            Kind.FOCUS -> FocusContent(label = r.text, goalId = r.goalId, onClose = { finish() })
-                            Kind.TRIP -> TripContent(initialText = r.text.orEmpty(), onClose = { finish() })
-                            else -> AddContent(r.kind, r.text.orEmpty(), onClose = { finish() })
+                        if (showNote) {
+                            key("note") {
+                                NoteContent(initialText = noteInitial, onClose = { finish() })
+                            }
+                        } else {
+                            key("add") {
+                                AddSheetContent(
+                                    initialMode = when (r.kind) {
+                                        Kind.FOCUS -> AddMode.FOCUS
+                                        Kind.TRIP -> AddMode.TRIP
+                                        Kind.REMIND -> AddMode.REMIND
+                                        else -> AddMode.PICK
+                                    },
+                                    initialText = r.text.orEmpty(),
+                                    goalId = r.goalId,
+                                    onSwitchToNote = { typed ->
+                                        noteInitial = typed
+                                        switchedToNote = true
+                                    },
+                                    onClose = { finish() },
+                                )
+                            }
                         }
                     }
                 }
@@ -186,7 +210,7 @@ class QuickAddActivity : ComponentActivity() {
         private const val EXTRA_GOAL = "goal"
         private const val STATE_SERIAL = "serial"
 
-        /** [text] fills the field, or for focus names what it's for; [goalId] ties a timer to a goal. */
+        /** [text] fills the field, or for focus names what it's for; [goalId] ties a timer to a to-do. */
         fun open(ctx: Context, kind: Kind, text: String? = null, goalId: String? = null) {
             val action = when (kind) {
                 Kind.GOAL -> ACTION_ADD_GOAL
@@ -207,6 +231,8 @@ class QuickAddActivity : ComponentActivity() {
         }
     }
 }
+
+private enum class AddMode { PICK, FOCUS, TRIP, REMIND }
 
 /** "Remind me in" quick picks, in minutes. */
 private val REMIND_IN = listOf(10, 30, 60, 120)
@@ -245,39 +271,254 @@ private fun Sheet(onClose: () -> Unit, content: @Composable ColumnScope.() -> Un
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun SheetTitle(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.titleLargeEmphasized,
-        maxLines = 2,
-        overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.padding(start = 4.dp, bottom = 12.dp),
-    )
+private fun SheetTitle(text: String, onBack: (() -> Unit)? = null) {
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (onBack != null) {
+            IconButton(onClick = onBack, shapes = IconButtonDefaults.shapes()) {
+                Icon(painterResource(R.drawable.ic_arrow_back), contentDescription = "Back")
+            }
+        }
+        Text(
+            text,
+            style = MaterialTheme.typography.titleLargeEmphasized,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = if (onBack != null) 0.dp else 4.dp),
+        )
+    }
 }
 
+/**
+ * Type first, then choose: Add (to-do), Focus, In&Out, Remind me… or Note.
+ * When opened directly in a verb mode (from ▶, a tile, a shortcut, or Reminders), shows that
+ * verb straight away and lets Back return to the chooser or close.
+ */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalLayoutApi::class)
 @Composable
-private fun AddContent(kind: QuickAddActivity.Kind, initialText: String, onClose: () -> Unit) {
-    val note = kind == QuickAddActivity.Kind.NOTE
-    val remind = kind == QuickAddActivity.Kind.REMIND
+private fun AddSheetContent(
+    initialMode: AddMode,
+    initialText: String,
+    goalId: String?,
+    onSwitchToNote: (String) -> Unit,
+    onClose: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    var mode by rememberSaveable { mutableStateOf(initialMode) }
     var text by rememberSaveable { mutableStateOf(initialText) }
     var added by rememberSaveable { mutableIntStateOf(0) }
-    var inMinutes by rememberSaveable { mutableIntStateOf(30) }
-    /** >= 0 when a specific clock time was picked ("At 8:00"), -1 for relative ("In 30 min"). */
-    var atHour by rememberSaveable { mutableIntStateOf(-1) }
-    var atMinute by rememberSaveable { mutableIntStateOf(0) }
-    // Ring by default so one-off reminders aren't easily missed; tap the muted bell to silence.
-    var alarm by rememberSaveable { mutableStateOf(true) }
-    var picking by rememberSaveable { mutableStateOf(false) }
-    val now = rememberNow(active = remind, periodMs = 15_000L)
+    val focusReq = remember { FocusRequester() }
+
+    val canGoBack = mode != AddMode.PICK && initialMode == AddMode.PICK
+    BackHandler(enabled = canGoBack) { mode = AddMode.PICK }
+
+    // Keyboard stays up when typing a name; drops down when choosing Focus or after typing and picking a verb.
+    val needsKeyboard = when (mode) {
+        AddMode.PICK -> true
+        AddMode.FOCUS -> false
+        AddMode.TRIP, AddMode.REMIND -> text.isBlank() && initialMode == mode
+    }
+    LaunchedEffect(mode) {
+        if (needsKeyboard) {
+            focusReq.requestFocus()
+            delay(150)
+            keyboard?.show()
+        } else {
+            keyboard?.hide()
+        }
+    }
+
+    fun addTodo(): Boolean {
+        if (text.isBlank()) return false
+        GoalStore.add(text)
+        text = ""
+        added++
+        return true
+    }
+
+    when (mode) {
+        AddMode.PICK -> {
+            SheetTitle(if (added > 0) "Saved $added ✓  Another one?" else "What's on your mind?")
+            TextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier.fillMaxWidth().focusRequester(focusReq),
+                placeholder = { Text("Reply to Sam, call the bank, check stories…") },
+                singleLine = true,
+                maxLines = 1,
+                shape = RoundedCornerShape(28.dp),
+                colors = TextFieldDefaults.colors(
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                ),
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences,
+                    imeAction = ImeAction.Done,
+                ),
+                // Keyboard Done adds the to-do and keeps the sheet open for another.
+                keyboardActions = KeyboardActions(onDone = { addTodo() }),
+            )
+            Spacer(Modifier.height(12.dp))
+            FlowRow(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = { addTodo() },
+                    enabled = text.isNotBlank(),
+                    shapes = ButtonDefaults.shapes(),
+                    modifier = Modifier.heightIn(min = 44.dp),
+                ) { Text("Add") }
+                VerbChip(R.drawable.ic_play, "Focus") {
+                    keyboard?.hide()
+                    mode = AddMode.FOCUS
+                }
+                VerbChip(R.drawable.ic_trip, "In&Out") {
+                    if (text.isNotBlank()) keyboard?.hide()
+                    mode = AddMode.TRIP
+                }
+                VerbChip(R.drawable.ic_bell, "Remind me…") {
+                    if (text.isNotBlank()) keyboard?.hide()
+                    mode = AddMode.REMIND
+                }
+                VerbChip(R.drawable.ic_note, "Note") {
+                    onSwitchToNote(text)
+                }
+            }
+            if (added > 0 && text.isBlank()) {
+                Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onClose, shapes = ButtonDefaults.shapes()) { Text("Done") }
+                }
+            }
+        }
+
+        AddMode.FOCUS -> {
+            FocusVerbContent(
+                label = text.trim().takeIf { it.isNotEmpty() },
+                goalId = goalId,
+                onBack = if (canGoBack) { { mode = AddMode.PICK } } else null,
+                onClose = onClose,
+            )
+        }
+
+        AddMode.TRIP -> {
+            TripVerbContent(
+                text = text,
+                onTextChange = { text = it },
+                showInput = initialMode == AddMode.TRIP || text.isBlank(),
+                focusRequester = focusReq,
+                onBack = if (canGoBack) { { mode = AddMode.PICK } } else null,
+                onClose = onClose,
+            )
+        }
+
+        AddMode.REMIND -> {
+            RemindVerbContent(
+                text = text,
+                onTextChange = { text = it },
+                showInput = initialMode == AddMode.REMIND || text.isBlank(),
+                focusRequester = focusReq,
+                onBack = if (canGoBack) { { mode = AddMode.PICK } } else null,
+                onClose = onClose,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun VerbChip(icon: Int, label: String, onClick: () -> Unit) {
+    FilledTonalButton(
+        onClick = onClick,
+        shapes = ButtonDefaults.shapes(),
+        contentPadding = PaddingValues(horizontal = 12.dp),
+        modifier = Modifier.heightIn(min = 44.dp),
+    ) {
+        Icon(painterResource(icon), contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(label, maxLines = 1)
+    }
+}
+
+/** Direct multi-line note sheet (also reached by tapping Note from the add sheet). */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun NoteContent(initialText: String, onClose: () -> Unit) {
+    var text by rememberSaveable { mutableStateOf(initialText) }
+    var added by rememberSaveable { mutableIntStateOf(0) }
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
 
     LaunchedEffect(Unit) {
         focus.requestFocus()
-        delay(150) // The window needs to have focus before the keyboard will open.
+        delay(150)
         keyboard?.show()
     }
+
+    fun save(): Boolean {
+        if (text.isBlank()) return false
+        NoteStore.add(text)
+        text = ""
+        added++
+        return true
+    }
+
+    SheetTitle(if (added > 0) "Saved $added ✓  Another one?" else "Note")
+    TextField(
+        value = text,
+        onValueChange = { text = it },
+        modifier = Modifier.fillMaxWidth().focusRequester(focus),
+        placeholder = { Text("A thought, an idea, something to look up…") },
+        singleLine = false,
+        maxLines = 8,
+        shape = RoundedCornerShape(28.dp),
+        colors = TextFieldDefaults.colors(
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        ),
+        keyboardOptions = KeyboardOptions(
+            capitalization = KeyboardCapitalization.Sentences,
+            imeAction = ImeAction.Default,
+        ),
+    )
+    Spacer(Modifier.height(12.dp))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Spacer(Modifier.weight(1f))
+        TextButton(onClick = { save() }, enabled = text.isNotBlank(), shapes = ButtonDefaults.shapes()) {
+            Text("Save, add another")
+        }
+        Button(onClick = { if (save()) onClose() }, enabled = text.isNotBlank(), shapes = ButtonDefaults.shapes(), modifier = Modifier.heightIn(min = 48.dp)) {
+            Text("Save")
+        }
+    }
+}
+
+/** Remind me mode inside the add sheet: quick durations, clock time, Repeat…, and mute bell. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun RemindVerbContent(
+    text: String,
+    onTextChange: (String) -> Unit,
+    showInput: Boolean,
+    focusRequester: FocusRequester,
+    onBack: (() -> Unit)?,
+    onClose: () -> Unit,
+) {
+    var inMinutes by rememberSaveable { mutableIntStateOf(30) }
+    var atHour by rememberSaveable { mutableIntStateOf(-1) }
+    var atMinute by rememberSaveable { mutableIntStateOf(0) }
+    var alarm by rememberSaveable { mutableStateOf(true) }
+    var picking by rememberSaveable { mutableStateOf(false) }
+    var repeatOpen by rememberSaveable { mutableStateOf(false) }
+    val now = rememberNow(active = true, periodMs = 15_000L)
 
     fun at(base: Long = System.currentTimeMillis()): Long =
         if (atHour >= 0) Reminder.nextOccurrence(atHour, atMinute, Instant.ofEpochMilli(base).atZone(ZoneId.systemDefault()))
@@ -285,13 +526,8 @@ private fun AddContent(kind: QuickAddActivity.Kind, initialText: String, onClose
 
     fun save(): Boolean {
         if (text.isBlank()) return false
-        when (kind) {
-            QuickAddActivity.Kind.NOTE -> NoteStore.add(text)
-            QuickAddActivity.Kind.REMIND -> ReminderStore.save(Reminder.once(text, at(), alarm))
-            else -> GoalStore.add(text)
-        }
-        text = ""
-        added++
+        ReminderStore.save(Reminder.once(text, at(), alarm))
+        onClose()
         return true
     }
 
@@ -307,105 +543,85 @@ private fun AddContent(kind: QuickAddActivity.Kind, initialText: String, onClose
         )
     }
 
-    SheetTitle(
-        when {
-            added > 0 -> "Saved $added ✓  Another one?"
-            note -> "Note"
-            remind -> "Remind me"
-            else -> "To-do"
-        },
-    )
-    TextField(
-        value = text,
-        onValueChange = { text = it },
-        modifier = Modifier.fillMaxWidth().focusRequester(focus),
-        placeholder = {
-            Text(
-                when {
-                    note -> "A thought, an idea, something to look up…"
-                    remind -> "What about?"
-                    else -> "What do you want to get done?"
-                },
-            )
-        },
-        singleLine = !note,
-        maxLines = if (note) 8 else 1,
-        shape = RoundedCornerShape(28.dp),
-        colors = TextFieldDefaults.colors(
-            focusedIndicatorColor = Color.Transparent,
-            unfocusedIndicatorColor = Color.Transparent,
-            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-        ),
-        // In a note Enter starts a new line; elsewhere it saves.
-        keyboardOptions = KeyboardOptions(
-            capitalization = KeyboardCapitalization.Sentences,
-            imeAction = if (note) ImeAction.Default else ImeAction.Done,
-        ),
-        keyboardActions = KeyboardActions(onDone = { if (save()) onClose() }),
-    )
-
-    if (remind) {
-        Spacer(Modifier.height(12.dp))
-        val pickedClockLabel = if (atHour >= 0) {
-            LocalTime.of(atHour, atMinute).format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT))
-        } else null
-        DurationRow(
-            REMIND_IN,
-            inMinutes,
-            onSelect = { atHour = -1; inMinutes = it },
-            onOther = { picking = true },
-            prefix = "In ",
-            customLabel = pickedClockLabel,
-            otherIcon = R.drawable.ic_schedule,
-            otherDescription = "Pick a time",
+    if (repeatOpen) {
+        ReminderSheet(
+            initial = null,
+            initialText = text.trim(),
+            startOnRepeat = true,
+            onDismiss = { repeatOpen = false; onClose() },
         )
     }
 
+    SheetTitle(if (showInput) "Remind me" else text.trim(), onBack = onBack)
+    if (showInput) {
+        TextField(
+            value = text,
+            onValueChange = onTextChange,
+            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+            placeholder = { Text("What about?") },
+            singleLine = true,
+            maxLines = 1,
+            shape = RoundedCornerShape(28.dp),
+            colors = TextFieldDefaults.colors(
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            ),
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Sentences,
+                imeAction = ImeAction.Done,
+            ),
+            keyboardActions = KeyboardActions(onDone = { save() }),
+        )
+        Spacer(Modifier.height(12.dp))
+    }
+
+    val pickedClockLabel = if (atHour >= 0) {
+        LocalTime.of(atHour, atMinute).format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT))
+    } else null
+    DurationRow(
+        REMIND_IN,
+        inMinutes,
+        onSelect = { atHour = -1; inMinutes = it },
+        onOther = { picking = true },
+        prefix = "In ",
+        customLabel = pickedClockLabel,
+        otherIcon = R.drawable.ic_schedule,
+        otherDescription = "Pick a time",
+    )
+
     Spacer(Modifier.height(12.dp))
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (remind) {
-            // Rings by default; toggling this silences it to a normal notification.
-            FilledTonalIconToggleButton(
-                checked = !alarm,
-                onCheckedChange = { muted -> alarm = !muted },
-                shapes = IconButtonDefaults.toggleableShapes(),
-                modifier = Modifier.size(48.dp),
-            ) {
-                Icon(
-                    painterResource(R.drawable.ic_bell_off),
-                    contentDescription = if (alarm) "Silence reminder" else "Ring like an alarm",
-                )
-            }
-            Spacer(Modifier.weight(1f))
-        } else {
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = { save() }, enabled = text.isNotBlank(), shapes = ButtonDefaults.shapes()) {
-                Text("Save, add another")
-            }
+        FilledTonalIconToggleButton(
+            checked = !alarm,
+            onCheckedChange = { muted -> alarm = !muted },
+            shapes = IconButtonDefaults.toggleableShapes(),
+            modifier = Modifier.size(48.dp),
+        ) {
+            Icon(
+                painterResource(R.drawable.ic_bell_off),
+                contentDescription = if (alarm) "Silence reminder" else "Ring like an alarm",
+            )
         }
-        Button(onClick = { if (save()) onClose() }, enabled = text.isNotBlank(), shapes = ButtonDefaults.shapes(), modifier = Modifier.heightIn(min = 48.dp)) {
-            val label = if (!remind) {
-                "Save"
-            } else {
-                val target = at(now)
-                val isTomorrow = Instant.ofEpochMilli(target).atZone(ZoneId.systemDefault()).toLocalDate()
-                    .isAfter(LocalDate.now(ZoneId.systemDefault()))
-                val whenLabel = if (isTomorrow) "tomorrow ${clockTime(target)}" else "at ${clockTime(target)}"
-                if (alarm) "Ring $whenLabel" else "Remind $whenLabel"
-            }
-            Text(label)
+        TextButton(onClick = { repeatOpen = true }, shapes = ButtonDefaults.shapes()) {
+            Text("Repeat…")
+        }
+        Spacer(Modifier.weight(1f))
+        Button(onClick = { save() }, enabled = text.isNotBlank(), shapes = ButtonDefaults.shapes(), modifier = Modifier.heightIn(min = 48.dp)) {
+            val target = at(now)
+            val isTomorrow = Instant.ofEpochMilli(target).atZone(ZoneId.systemDefault()).toLocalDate()
+                .isAfter(LocalDate.now(ZoneId.systemDefault()))
+            val whenLabel = if (isTomorrow) "tomorrow ${clockTime(target)}" else "at ${clockTime(target)}"
+            Text(if (alarm) "Ring $whenLabel" else "Remind $whenLabel")
         }
     }
 }
 
-/**
- * Focus, the same shape as the other sheets: pick a length, then start now, or start in a few
- * minutes when you need to wrap something up first.
- */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalLayoutApi::class)
+/** Focus mode inside the add sheet: pick a length, then start now or after a get-ready countdown. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun FocusContent(label: String?, goalId: String?, onClose: () -> Unit) {
+private fun FocusVerbContent(label: String?, goalId: String?, onBack: (() -> Unit)?, onClose: () -> Unit) {
     val ctx = LocalContext.current
     val timer by FocusTimer.state.collectAsState()
     var focus by rememberSaveable { mutableIntStateOf(AppPrefs.focusMinutes(ctx)) }
@@ -434,7 +650,7 @@ private fun FocusContent(label: String?, goalId: String?, onClose: () -> Unit) {
         )
     }
 
-    SheetTitle(label ?: "Focus")
+    SheetTitle(label ?: "Focus", onBack = onBack)
     DurationRow(AppPrefs.FOCUS_PRESETS, focus, onSelect = { focus = it }, onOther = { picking = "focus" }, prefix = "Focus for ")
     if (timer.isActive) {
         Text(
@@ -447,7 +663,6 @@ private fun FocusContent(label: String?, goalId: String?, onClose: () -> Unit) {
 
     Spacer(Modifier.height(12.dp))
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-        // "Start in 5 min", with the arrow for another get-ready time.
         Box {
             SplitButtonLayout(
                 leadingButton = {
@@ -474,27 +689,22 @@ private fun FocusContent(label: String?, goalId: String?, onClose: () -> Unit) {
     }
 }
 
-/**
- * In&Out: name a quick errand, pick 1 / 2 / 5 min, Go. Tapping a recent chip starts it in one tap
- * with its last time.
- */
+/** In&Out mode inside the add sheet: recent chips, 1 / 2 / 5 min, Go. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalLayoutApi::class)
 @Composable
-private fun TripContent(initialText: String, onClose: () -> Unit) {
+private fun TripVerbContent(
+    text: String,
+    onTextChange: (String) -> Unit,
+    showInput: Boolean,
+    focusRequester: FocusRequester,
+    onBack: (() -> Unit)?,
+    onClose: () -> Unit,
+) {
     val ctx = LocalContext.current
     val recent by Trips.recent.collectAsState()
     val showTip = remember { !Trips.seenTip() }
     val canOverlay = FloatingGoals.canDraw(ctx)
-    var text by rememberSaveable { mutableStateOf(initialText) }
     var minutes by rememberSaveable { mutableIntStateOf(Trips.lastMinutes()) }
-    val focus = remember { FocusRequester() }
-    val keyboard = LocalSoftwareKeyboardController.current
-
-    LaunchedEffect(Unit) {
-        focus.requestFocus()
-        delay(150)
-        keyboard?.show()
-    }
 
     fun start(name: String, mins: Int) {
         if (!FloatingGoals.canDraw(ctx)) {
@@ -504,7 +714,7 @@ private fun TripContent(initialText: String, onClose: () -> Unit) {
         if (Trips.start(name, mins)) onClose()
     }
 
-    SheetTitle("In&Out")
+    SheetTitle(if (showInput) "In&Out" else text.trim(), onBack = onBack)
     if (showTip) {
         Text(
             "Start it, then open the app.",
@@ -513,28 +723,30 @@ private fun TripContent(initialText: String, onClose: () -> Unit) {
             modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
         )
     }
-    TextField(
-        value = text,
-        onValueChange = { text = it },
-        modifier = Modifier.fillMaxWidth().focusRequester(focus),
-        placeholder = { Text("check Marco's stories") },
-        singleLine = true,
-        maxLines = 1,
-        shape = RoundedCornerShape(28.dp),
-        colors = TextFieldDefaults.colors(
-            focusedIndicatorColor = Color.Transparent,
-            unfocusedIndicatorColor = Color.Transparent,
-            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-        ),
-        keyboardOptions = KeyboardOptions(
-            capitalization = KeyboardCapitalization.Sentences,
-            imeAction = ImeAction.Done,
-        ),
-        keyboardActions = KeyboardActions(onDone = { start(text, minutes) }),
-    )
+    if (showInput) {
+        TextField(
+            value = text,
+            onValueChange = onTextChange,
+            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+            placeholder = { Text("check Marco's stories") },
+            singleLine = true,
+            maxLines = 1,
+            shape = RoundedCornerShape(28.dp),
+            colors = TextFieldDefaults.colors(
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            ),
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Sentences,
+                imeAction = ImeAction.Done,
+            ),
+            keyboardActions = KeyboardActions(onDone = { start(text, minutes) }),
+        )
+    }
 
-    if (recent.isNotEmpty()) {
+    if (recent.isNotEmpty() && showInput) {
         Spacer(Modifier.height(8.dp))
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
@@ -544,13 +756,7 @@ private fun TripContent(initialText: String, onClose: () -> Unit) {
             recent.forEach { item ->
                 AssistChip(
                     onClick = { start(item.name, item.minutes) },
-                    label = {
-                        Text(
-                            item.name,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
+                    label = { Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 )
             }
         }

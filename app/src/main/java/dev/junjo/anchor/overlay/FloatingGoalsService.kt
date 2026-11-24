@@ -949,6 +949,13 @@ private fun ExpandedList(
                     style = MaterialTheme.typography.titleMediumEmphasized,
                     modifier = drag.weight(1f).padding(start = 8.dp, top = 12.dp, bottom = 12.dp),
                 )
+                IconButton(onClick = onOpenApp, shapes = IconButtonDefaults.shapes()) {
+                    Icon(
+                        painterResource(R.drawable.ic_open_in_new),
+                        contentDescription = "Open Anchor",
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
                 TextButton(onClick = onTuck, shapes = ButtonDefaults.shapes()) { Text("Tuck away") }
             }
 
@@ -1104,9 +1111,6 @@ private fun ExpandedList(
                     Spacer(Modifier.width(4.dp))
                     Text("In&Out", maxLines = 1)
                 }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onOpenApp, shapes = ButtonDefaults.shapes()) { Text("Open app") }
             }
         }
     }
