@@ -45,8 +45,8 @@ class BackupTest {
     }
 
     @Test fun summaryMessageFormatsCleanly() {
-        assertEquals("Restored 1 goal, 2 notes, 1 reminder", Backup.Summary(1, 2, 1).message())
-        assertEquals("Restored 3 goals", Backup.Summary(3, 0, 0).message())
+        assertEquals("Restored 1 to-do, 2 notes, 1 reminder", Backup.Summary(1, 2, 1).message())
+        assertEquals("Restored 3 to-dos", Backup.Summary(3, 0, 0).message())
         assertEquals("Backup imported (nothing active to restore)", Backup.Summary(0, 0, 0).message())
     }
 }

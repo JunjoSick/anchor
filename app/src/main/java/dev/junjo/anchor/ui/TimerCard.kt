@@ -136,7 +136,7 @@ fun TimerCard(state: FocusTimer.State, modifier: Modifier = Modifier) {
                     val goalId = state.goalId
                     if (goalId != null && GoalStore.find(goalId)?.isActive == true) {
                         TextButton(onClick = { GoalStore.setDone(goalId, true); FocusTimer.stop() }, shapes = ButtonDefaults.shapes()) {
-                            Text("Goal done ✓")
+                            Text("Done ✓")
                         }
                     }
                     OutlinedButton(onClick = { FocusTimer.addMinutes(5) }, shapes = ButtonDefaults.shapes()) { Text("+5 min") }

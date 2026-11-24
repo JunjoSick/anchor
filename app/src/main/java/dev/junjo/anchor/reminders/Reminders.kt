@@ -186,7 +186,7 @@ object Reminders {
         val builder = NotificationCompat.Builder(ctx, if (r.alarm) Notifications.CH_REMINDER_ALARM else Notifications.CH_REMINDER)
             .setSmallIcon(R.drawable.ic_bell)
             .setContentTitle(r.text)
-            .setContentText(if (goal != null) "On your goal list until you tick it off" else r.daysText)
+            .setContentText(if (goal != null) "On your list until you tick it off" else r.daysText)
             .setCategory(if (r.alarm) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_REMINDER)
             .setPriority(if (r.alarm) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_HIGH)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)

@@ -196,7 +196,7 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}) {
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             LargeFlexibleTopAppBar(
-                title = { Text("Today") },
+                title = { Text("To-do") },
                 subtitle = {
                     Text(
                         when {
@@ -279,7 +279,7 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}) {
             if (active.size > SOFT_LIMIT) {
                 item(key = "limit") {
                     Text(
-                        "That's ${active.size} things to keep in mind. Which 3 matter most today? The rest can go.",
+                        "That's ${active.size} things to keep in mind. Which 3 matter most? The rest can go.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.animateItem().padding(horizontal = 8.dp, vertical = 12.dp),
@@ -356,13 +356,13 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}) {
             EditSheet(
                 initial = note.text,
                 multiLine = true,
-                otherLabel = "Make it a goal",
+                otherLabel = "Make it a to-do",
                 onOther = { text ->
-                    // Save any edit, keep the note intact, and copy its first line onto today's goals.
+                    // Save any edit, keep the note intact, and copy its first line onto the list.
                     if (text.trim() != note.text) NoteStore.edit(note.id, text)
                     val goal = GoalStore.add(text.lineSequence().first { it.isNotBlank() })
                     editingNoteId = null
-                    offerUndo("Added to your goals") {
+                    offerUndo("Added to your list") {
                         goal?.let { GoalStore.delete(it.id) }
                     }
                 },
@@ -428,7 +428,7 @@ private fun AddMenu() {
         FloatingActionButtonMenuItem(
             onClick = { pick(QuickAddActivity.Kind.GOAL) },
             icon = { Icon(painterResource(R.drawable.ic_check_circle), contentDescription = null) },
-            text = { Text("Goal") },
+            text = { Text("To-do") },
         )
         FloatingActionButtonMenuItem(
             onClick = { pick(QuickAddActivity.Kind.NOTE) },
@@ -499,9 +499,9 @@ private fun EmptyState(modifier: Modifier = Modifier) {
             )
         }
         Spacer(Modifier.height(16.dp))
-        Text("Nothing on your mind", style = MaterialTheme.typography.titleLargeEmphasized)
+        Text("Nothing on your list", style = MaterialTheme.typography.titleLargeEmphasized)
         Text(
-            "Tap + for a goal or a note.",
+            "Tap + to add something.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp),
@@ -605,9 +605,9 @@ private fun CarriedOverCard(
 ) {
     Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.tertiaryContainer) {
         Column(Modifier.padding(20.dp)) {
-            Text("Still on from before?", style = MaterialTheme.typography.titleLargeEmphasized)
+            Text("Still on?", style = MaterialTheme.typography.titleLargeEmphasized)
             Text(
-                "Keep what still matters today. Dropping one is a decision, not a failure.",
+                "Keep what still matters. Dropping one is a decision, not a failure.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Spacer(Modifier.height(8.dp))
@@ -670,7 +670,7 @@ private fun setupItems(ctx: Context, onWidgetUnsupported: () -> Unit): List<Setu
     fun open(intent: Intent) = runCatching { ctx.startActivity(intent) }
 
     if (!Notifications.canPost(ctx)) add(
-        SetupItem("Allow notifications", "Timers, alarms and your goals on the lock screen need them.", "Allow") {
+        SetupItem("Allow notifications", "Timers, alarms and your list on the lock screen need them.", "Allow") {
             open(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, pkg))
         },
     )
@@ -687,12 +687,12 @@ private fun setupItems(ctx: Context, onWidgetUnsupported: () -> Unit): List<Setu
         },
     )
     if (!FloatingGoals.isOn(ctx)) add(
-        SetupItem("Keep a goal floating on screen", "A small bubble over every app shows your top goal and the timer.", "Turn on") {
+        SetupItem("Keep your list floating on screen", "A small bubble over every app shows your top to-do and the timer.", "Turn on") {
             FloatingGoals.enable(ctx)
         },
     )
     if (!Widgets.isPlaced(ctx)) add(
-        SetupItem("Put your goals on the home screen", "A widget keeps them in sight, so you don't have to remember to look.", "Add") {
+        SetupItem("Put your list on the home screen", "A widget keeps them in sight, so you don't have to remember to look.", "Add") {
             if (!Widgets.requestPin(ctx)) onWidgetUnsupported()
         },
     )
@@ -748,8 +748,8 @@ private fun SettingsSection(refresh: Int, onShowSetup: () -> Unit, onMessage: (S
             modifier = Modifier.padding(start = 8.dp, bottom = 8.dp),
         )
         SettingRow(
-            title = "Floating goal bubble",
-            about = "A small pill over every app with your top goal, or the countdown while a timer runs. Tap it for the list; drag it anywhere, or push it off the side to tuck it into the edge.",
+            title = "Floating bubble",
+            about = "A small pill over every app with your top to-do, or the countdown while a timer runs. Tap it for your list; drag it anywhere, or push it off the side to tuck it into the edge.",
             checked = bubble,
             shape = segmentShape(0, 3),
         ) {
@@ -759,7 +759,7 @@ private fun SettingsSection(refresh: Int, onShowSetup: () -> Unit, onMessage: (S
         Spacer(Modifier.height(2.dp))
         SettingRow(
             title = "Nudge tucked bubble",
-            about = "Briefly flashes the tucked edge tab red every few minutes while you still have open goals.",
+            about = "Briefly flashes the tucked edge tab red every few minutes while you still have open to-dos.",
             checked = bubbleNudge,
             shape = segmentShape(1, 3),
         ) {
@@ -768,8 +768,8 @@ private fun SettingsSection(refresh: Int, onShowSetup: () -> Unit, onMessage: (S
         }
         Spacer(Modifier.height(2.dp))
         SettingRow(
-            title = "Goals in notifications",
-            about = "Shows your list on the lock screen and lets you add a goal from the notification shade.",
+            title = "Your list in notifications",
+            about = "Shows your list on the lock screen and lets you add a to-do from the notification shade.",
             checked = goalsNotification,
             shape = segmentShape(2, 3),
         ) {
@@ -798,10 +798,10 @@ private fun SettingsSection(refresh: Int, onShowSetup: () -> Unit, onMessage: (S
         Spacer(Modifier.height(8.dp))
         if (Build.VERSION.SDK_INT >= 33) {
             TextButton(onClick = { requestTile(ctx, QuickAddTileService::class.java, R.string.tile_label, R.drawable.ic_add) }, shapes = ButtonDefaults.shapes()) {
-                Text("Add an “Add goal” button to Quick Settings")
+                Text("Add an “Add” button to Quick Settings")
             }
             TextButton(onClick = { requestTile(ctx, NoteTileService::class.java, R.string.note_tile_label, R.drawable.ic_note) }, shapes = ButtonDefaults.shapes()) {
-                Text("Add an “Add note” button to Quick Settings")
+                Text("Add a “Note” button to Quick Settings")
             }
             TextButton(onClick = { requestTile(ctx, TripTileService::class.java, R.string.trip_tile_label, R.drawable.ic_trip) }, shapes = ButtonDefaults.shapes()) {
                 Text("Add an “In&Out” button to Quick Settings")

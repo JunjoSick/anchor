@@ -103,7 +103,7 @@ fun RemindersScreen(onBack: () -> Unit) {
                     ) {
                         Icon(painterResource(R.drawable.ic_add), contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Repeating")
+                        Text("Routine")
                     }
                 }
             }

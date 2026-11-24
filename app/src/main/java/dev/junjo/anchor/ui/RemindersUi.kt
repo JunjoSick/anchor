@@ -82,8 +82,8 @@ fun LazyListScope.remindersSection(
     if (reminders.isEmpty()) {
         item(key = "reminders-empty") {
             Text(
-                "Once: a call in 40 minutes. Repeating: meds, water, bedtime. " +
-                    "When one goes off it lands on your goal list until you tick it off.",
+                "Once: a call in 40 minutes. Routines: meds, water, bedtime. " +
+                    "When one goes off it lands on your list until you tick it off.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.animateItem().padding(horizontal = 8.dp),
@@ -294,7 +294,7 @@ fun ReminderSheet(initial: Reminder?, onDismiss: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("Put it on my goal list", style = MaterialTheme.typography.titleSmall)
+                    Text("Put it on my list", style = MaterialTheme.typography.titleSmall)
                     Text(
                         "Stays in the bubble and widget until you tick it off, so it can't get swiped away.",
                         style = MaterialTheme.typography.bodySmall,

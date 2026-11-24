@@ -842,7 +842,7 @@ private fun EdgeTab(side: Dock, active: List<Goal>, timer: FocusTimer.State, nud
             }
             Icon(
                 painterResource(R.drawable.ic_chevron),
-                contentDescription = "Bring the goal bubble back",
+                contentDescription = "Bring the bubble back",
                 modifier = Modifier.size(20.dp).rotate(if (side == Dock.LEFT) 0f else 180f),
             )
         }
@@ -945,7 +945,7 @@ private fun ExpandedList(
             // The title is the drag handle, so the list and buttons stay easy to tap.
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    if (active.isEmpty()) "Goals" else "Goals · ${active.size}",
+                    if (active.isEmpty()) "To-do" else "To-do · ${active.size}",
                     style = MaterialTheme.typography.titleMediumEmphasized,
                     modifier = drag.weight(1f).padding(start = 8.dp, top = 12.dp, bottom = 12.dp),
                 )
@@ -1082,7 +1082,7 @@ private fun ExpandedList(
                 ) {
                     Icon(painterResource(R.drawable.ic_add), contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("Goal", maxLines = 1)
+                    Text("Add", maxLines = 1)
                 }
                 FilledTonalButton(
                     onClick = { onAdd(QuickAddActivity.Kind.NOTE) },

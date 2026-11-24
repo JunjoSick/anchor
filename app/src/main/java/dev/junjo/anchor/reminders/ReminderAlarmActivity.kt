@@ -66,7 +66,7 @@ class ReminderAlarmActivity : ComponentActivity() {
                 LaunchedEffect(ringing) { if (reminder.id !in ringing) finish() }
                 ReminderAlarmScreen(
                     text = reminder.text,
-                    about = if (goal != null) "It's on your goal list too" else reminder.daysText,
+                    about = if (goal != null) "It's on your list too" else reminder.daysText,
                     doneLabel = if (goal != null) "Done ✓" else "OK",
                     onDone = { send(Reminders.ACTION_DONE) },
                     onSnooze = { send(Reminders.ACTION_SNOOZE) },

@@ -45,10 +45,10 @@ object GoalsNotification {
             .setContentIntent(Notifications.openApp(ctx))
 
         if (active.isEmpty()) {
-            builder.setContentTitle("No goals right now")
-                .setContentText("Tap “Add goal” to note one down")
+            builder.setContentTitle("Nothing on your list")
+                .setContentText("Tap “Add” to put something down")
         } else {
-            builder.setContentTitle(if (active.size == 1) "1 goal" else "${active.size} goals")
+            builder.setContentTitle(if (active.size == 1) "1 to-do" else "${active.size} to-dos")
                 .setContentText(active.joinToString("  ·  ") { it.text })
             val style = NotificationCompat.InboxStyle()
             active.take(MAX_LINES).forEach { style.addLine("○  ${it.text}") }
@@ -56,7 +56,7 @@ object GoalsNotification {
             builder.setStyle(style)
         }
 
-        val input = RemoteInput.Builder(KEY_TEXT).setLabel("New goal").build()
+        val input = RemoteInput.Builder(KEY_TEXT).setLabel("Add").build()
         val add = PendingIntent.getBroadcast(
             ctx,
             100,
@@ -65,7 +65,7 @@ object GoalsNotification {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
         )
         builder.addAction(
-            NotificationCompat.Action.Builder(R.drawable.ic_add, "Add goal", add)
+            NotificationCompat.Action.Builder(R.drawable.ic_add, "Add", add)
                 .addRemoteInput(input)
                 .setAllowGeneratedReplies(false)
                 .build(),

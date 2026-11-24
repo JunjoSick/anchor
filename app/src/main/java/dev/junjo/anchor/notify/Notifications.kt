@@ -86,7 +86,7 @@ object Notifications {
 
         ctx.getSystemService(NotificationManager::class.java).createNotificationChannels(
             listOf(
-                quiet(CH_GOALS, "Goal list", "Your current goals, kept in the shade and on the lock screen"),
+                quiet(CH_GOALS, "To-do list", "Your current to-dos, kept in the shade and on the lock screen"),
                 quiet(CH_TIMER, "Running timer", "The countdown while a timer runs"),
                 cue,
                 done,

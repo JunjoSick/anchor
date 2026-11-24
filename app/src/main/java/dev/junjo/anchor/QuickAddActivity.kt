@@ -312,7 +312,7 @@ private fun AddContent(kind: QuickAddActivity.Kind, initialText: String, onClose
             added > 0 -> "Saved $added ✓  Another one?"
             note -> "Note"
             remind -> "Remind me"
-            else -> "Goal"
+            else -> "To-do"
         },
     )
     TextField(

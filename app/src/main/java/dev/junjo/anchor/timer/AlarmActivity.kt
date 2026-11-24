@@ -112,7 +112,7 @@ private fun AlarmScreen(state: FocusTimer.State) {
                         shapes = ButtonDefaults.shapes(),
                         modifier = big,
                         contentPadding = bigPadding,
-                    ) { Text("Goal done ✓", style = bigText) }
+                    ) { Text("Done ✓", style = bigText) }
                     Spacer(Modifier.height(12.dp))
                     FilledTonalButton(
                         onClick = { FocusTimer.stop() },

@@ -22,7 +22,7 @@ object Backup {
     data class Summary(val goals: Int, val notes: Int, val reminders: Int) {
         fun message(): String {
             val parts = buildList {
-                if (goals > 0) add(if (goals == 1) "1 goal" else "$goals goals")
+                if (goals > 0) add(if (goals == 1) "1 to-do" else "$goals to-dos")
                 if (notes > 0) add(if (notes == 1) "1 note" else "$notes notes")
                 if (reminders > 0) add(if (reminders == 1) "1 reminder" else "$reminders reminders")
             }

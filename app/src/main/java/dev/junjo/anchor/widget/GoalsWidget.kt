@@ -105,7 +105,7 @@ private fun WidgetContent(goals: List<Goal>, timer: FocusTimer.State) {
     ) {
         Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                if (active.isEmpty()) "Goals" else "Goals · ${active.size}",
+                if (active.isEmpty()) "To-do" else "To-do · ${active.size}",
                 maxLines = 1,
                 style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold),
                 modifier = GlanceModifier.defaultWeight().clickable(actionStartActivity<MainActivity>()),
@@ -147,7 +147,7 @@ private fun WidgetContent(goals: List<Goal>, timer: FocusTimer.State) {
             ) {
                 Image(
                     ImageProvider(R.drawable.ic_add),
-                    contentDescription = "Add goal",
+                    contentDescription = "Add",
                     colorFilter = ColorFilter.tint(GlanceTheme.colors.onPrimary),
                     modifier = GlanceModifier.size(21.dp),
                 )
@@ -161,7 +161,7 @@ private fun WidgetContent(goals: List<Goal>, timer: FocusTimer.State) {
 
         if (active.isEmpty() && done.isEmpty()) {
             Text(
-                "Nothing on the list. Tap + to add a goal.",
+                "Nothing on your list. Tap + to add something.",
                 style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 14.sp),
                 modifier = GlanceModifier.padding(vertical = 8.dp),
             )
