@@ -85,6 +85,7 @@ import dev.junjo.anchor.AppPrefs
 import dev.junjo.anchor.QuickAddActivity
 import dev.junjo.anchor.R
 import dev.junjo.anchor.clockTime
+import dev.junjo.anchor.data.Checklist
 import dev.junjo.anchor.data.Goal
 import dev.junjo.anchor.data.GoalStore
 import dev.junjo.anchor.data.NoteStore
@@ -418,14 +419,13 @@ fun HomeScreen(onOpenReminders: () -> Unit = {}, onOpenNotes: () -> Unit = {}) {
     val editingNote = editingNoteId?.let { id -> allNotes.firstOrNull { it.id == id && !it.deleted } }
     editingNote?.let { note ->
         key(note.id) {
-            EditSheet(
-                initial = note.text,
-                multiLine = true,
-                otherLabel = "Make it a to-do",
-                onOther = { text ->
+            NoteEditorSheet(
+                note = note,
+                onMakeTodo = { text ->
                     // Save any edit, keep the note intact, and copy its first line onto the list.
                     if (text.trim() != note.text) NoteStore.edit(note.id, text)
-                    val goal = GoalStore.add(text.lineSequence().first { it.isNotBlank() })
+                    val first = Checklist.firstCleanLine(text)
+                    val goal = first?.let { GoalStore.add(it) }
                     editingNoteId = null
                     offerUndo("Added to your list") {
                         goal?.let { GoalStore.delete(it.id) }

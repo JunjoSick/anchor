@@ -55,6 +55,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SplitButtonDefaults
 import androidx.compose.material3.SplitButtonLayout
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -89,6 +90,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import dev.junjo.anchor.data.Checklist
 import dev.junjo.anchor.data.GoalStore
 import dev.junjo.anchor.data.NoteStore
 import dev.junjo.anchor.data.Reminder
@@ -451,6 +453,7 @@ private fun VerbChip(icon: Int, label: String, onClick: () -> Unit) {
 @Composable
 private fun NoteContent(initialText: String, onClose: () -> Unit) {
     var text by rememberSaveable { mutableStateOf(initialText) }
+    var checklist by rememberSaveable { mutableStateOf(Checklist.isChecklist(initialText)) }
     var added by rememberSaveable { mutableIntStateOf(0) }
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -462,19 +465,37 @@ private fun NoteContent(initialText: String, onClose: () -> Unit) {
     }
 
     fun save(): Boolean {
-        if (text.isBlank()) return false
-        NoteStore.add(text)
+        val toSave = if (checklist) Checklist.toChecklist(text) else text
+        if (toSave.isBlank()) return false
+        NoteStore.add(toSave)
         text = ""
         added++
         return true
     }
 
-    SheetTitle(if (added > 0) "Saved $added ✓  Another one?" else "Note")
+    Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            if (added > 0) "Saved $added ✓  Another one?" else if (checklist) "Checklist" else "Note",
+            style = MaterialTheme.typography.titleLargeEmphasized,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).padding(start = 4.dp),
+        )
+        Text(
+            "Checklist",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(8.dp))
+        Switch(checked = checklist, onCheckedChange = { checklist = it })
+    }
     TextField(
         value = text,
         onValueChange = { text = it },
         modifier = Modifier.fillMaxWidth().focusRequester(focus),
-        placeholder = { Text("A thought, an idea, something to look up…") },
+        placeholder = {
+            Text(if (checklist) "One item per line…" else "A thought, an idea, something to look up…")
+        },
         singleLine = false,
         maxLines = 8,
         shape = RoundedCornerShape(28.dp),

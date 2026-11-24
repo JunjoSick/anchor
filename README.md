@@ -8,12 +8,12 @@ or **[⬇ download Anchor.apk](https://github.com/JunjoSick/anchor/releases/late
 
 ## What it does
 
-- **To-do:** your list, kept on the home screen, the lock screen and floating over your apps, with notes underneath. Tap to tick off, long-press to change or put first.
-- **+:** add a *To-do*, *Note*, *Remind me*, *Focus* or *In&Out* (also via the floating bubble, widget, Quick Settings and app icon shortcuts).
+- **To-do:** your list, kept on the home screen, the lock screen and floating over your apps, with notes (plain or checklist) underneath. Tap to tick off, long-press to change, put first, start In&Out, or hide until later.
+- **+:** type once, then choose *Add*, *Focus*, *In&Out*, *Remind me…* or *Note* (also via the floating bubble, widget, Quick Settings and app icon shortcuts).
 - **Focus:** ▶ next to a to-do, pick how long, *Start*. Or *Start in 5 min* to wrap up first — it rings when it's time to start. Counts down in the status bar and rings until you tap Done.
 - **In&Out:** a 1–5 min timed errand in another app — stays on the floating pill, cues halfway, and covers the feed with a STOP card when time is up.
 - **Reminders** (the bell on To-do): once, on set days, or every few days or hours. Rings like an alarm when it matters and lands on your list until you tick it off.
-- **No guilt:** untouched to-dos ask cleanly: keep or drop.
+- **No guilt:** to-dos left untouched for 3 days ask cleanly: keep or drop.
 
 Android 12 or newer. No account, no internet, no ads: everything stays on your phone.
 
