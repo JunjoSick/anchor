@@ -31,8 +31,8 @@ android {
         // Android 12: dynamic colours, exact-alarm permission model and modern widgets are all there.
         minSdk = 31
         targetSdk = 36
-        versionCode = 11
-        versionName = "0.6.1"
+        versionCode = 12
+        versionName = "0.6.2"
     }
 
     signingConfigs {

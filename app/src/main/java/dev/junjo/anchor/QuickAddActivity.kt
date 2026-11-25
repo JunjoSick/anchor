@@ -3,11 +3,25 @@ package dev.junjo.anchor
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.view.HapticFeedbackConstants
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -46,16 +60,13 @@ import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconToggleButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SplitButtonDefaults
 import androidx.compose.material3.SplitButtonLayout
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -73,16 +84,19 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -118,8 +132,9 @@ import java.time.format.FormatStyle
  * One fast capture sheet over whatever you were doing, opened from +, the bubble, the widget,
  * Quick Settings tiles and the app icon's shortcuts.
  *
- * Type first, then choose what to do with it: Add (to-do), Focus, In&Out, Remind me… or Note.
- * Opened from ▶, a tile, a shortcut or the Reminders page, it starts directly in that mode.
+ * One morphing surface for To-do · Remind · Note · Focus: type once and switch freely without
+ * losing text. In&Out (from the bubble, tile, shortcut or to-do long-press) and Focus tied to an
+ * existing to-do (from ▶) open directly in their dedicated sheets without extra chrome.
  */
 class QuickAddActivity : ComponentActivity() {
     enum class Kind { TODO, NOTE, REMIND, FOCUS, TRIP }
@@ -136,36 +151,30 @@ class QuickAddActivity : ComponentActivity() {
         setContent {
             AnchorTheme {
                 val r = request ?: return@AnchorTheme
-                // Keyed per request so switching kinds never restores single-line scroll state into
-                // a multi-line TextField (which crashes Compose).
+                // Keyed per request so each entry starts with fresh state and never mixes
+                // single-line and multi-line TextField scroll state.
                 key(r.serial) {
-                    var switchedToNote by rememberSaveable { mutableStateOf(false) }
-                    var noteInitial by rememberSaveable { mutableStateOf(r.text.orEmpty()) }
-                    val showNote = r.kind == Kind.NOTE || switchedToNote
-
                     Sheet(onClose = { finish() }) {
-                        if (showNote) {
-                            key("note") {
-                                NoteContent(initialText = noteInitial, onClose = { finish() })
-                            }
-                        } else {
-                            key("add") {
-                                AddSheetContent(
-                                    initialMode = when (r.kind) {
-                                        Kind.FOCUS -> AddMode.FOCUS
-                                        Kind.TRIP -> AddMode.TRIP
-                                        Kind.REMIND -> AddMode.REMIND
-                                        else -> AddMode.PICK
-                                    },
-                                    initialText = r.text.orEmpty(),
-                                    todoId = r.todoId,
-                                    onSwitchToNote = { typed ->
-                                        noteInitial = typed
-                                        switchedToNote = true
-                                    },
-                                    onClose = { finish() },
-                                )
-                            }
+                        when {
+                            r.kind == Kind.TRIP -> TripSheetContent(
+                                initialText = r.text.orEmpty(),
+                                onClose = { finish() },
+                            )
+                            r.kind == Kind.FOCUS && r.todoId != null -> DedicatedFocusContent(
+                                label = r.text,
+                                todoId = r.todoId,
+                                onClose = { finish() },
+                            )
+                            else -> CaptureSheetContent(
+                                initialTab = when (r.kind) {
+                                    Kind.REMIND -> CaptureTab.REMIND
+                                    Kind.NOTE -> CaptureTab.NOTE
+                                    Kind.FOCUS -> CaptureTab.FOCUS
+                                    else -> CaptureTab.TODO
+                                },
+                                initialText = r.text.orEmpty(),
+                                onClose = { finish() },
+                            )
                         }
                     }
                 }
@@ -193,13 +202,14 @@ class QuickAddActivity : ComponentActivity() {
             ACTION_TRIP -> Kind.TRIP
             else -> Kind.TODO
         }
-        // Focus has nothing to type, so the keyboard stays down; the others open with it up.
+        val text = intent?.getStringExtra(EXTRA_TEXT)
+        val hideIme = kind == Kind.FOCUS || (kind == Kind.TRIP && !text.isNullOrBlank())
         window.setSoftInputMode(
-            (if (kind == Kind.FOCUS) WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN else WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE) or
+            (if (hideIme) WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN else WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE) or
                 WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE,
         )
-        if (kind == Kind.FOCUS) WindowCompat.getInsetsController(window, window.decorView).hide(WindowInsetsCompat.Type.ime())
-        request = Request(kind, intent?.getStringExtra(EXTRA_TEXT), intent?.getStringExtra(EXTRA_GOAL), serial)
+        if (hideIme) WindowCompat.getInsetsController(window, window.decorView).hide(WindowInsetsCompat.Type.ime())
+        request = Request(kind, text, intent?.getStringExtra(EXTRA_GOAL), serial)
     }
 
     companion object {
@@ -234,19 +244,24 @@ class QuickAddActivity : ComponentActivity() {
     }
 }
 
-private enum class AddMode { PICK, FOCUS, TRIP, REMIND }
+private enum class CaptureTab(val label: String, val icon: Int) {
+    TODO("To-do", R.drawable.ic_circle),
+    REMIND("Remind", R.drawable.ic_bell),
+    NOTE("Note", R.drawable.ic_note),
+    FOCUS("Focus", R.drawable.ic_play),
+}
 
 /** "Remind me in" quick picks, in minutes. */
 private val REMIND_IN = listOf(10, 30, 60, 120)
 
-/** The shared shell: a dimmed backdrop that closes on tap, and a sheet rising from the bottom. */
+/** The shared shell: a dimmed backdrop that closes on tap, and a spring-sized sheet rising from the bottom. */
 @Composable
 private fun Sheet(onClose: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     val noRipple = remember { MutableInteractionSource() }
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.35f))
+            .background(Color.Black.copy(alpha = 0.38f))
             .clickable(interactionSource = noRipple, indication = null, onClick = onClose)
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
             .imePadding(),
@@ -255,6 +270,7 @@ private fun Sheet(onClose: () -> Unit, content: @Composable ColumnScope.() -> Un
         Surface(
             shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
             color = MaterialTheme.colorScheme.surfaceContainerLow,
+            tonalElevation = 2.dp,
             modifier = Modifier
                 .fillMaxWidth()
                 // Taps on the sheet itself must not fall through and close it.
@@ -264,306 +280,248 @@ private fun Sheet(onClose: () -> Unit, content: @Composable ColumnScope.() -> Un
                 Modifier
                     .verticalScroll(rememberScrollState())
                     .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
-                    .padding(16.dp),
-                content = content,
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun SheetTitle(text: String, onBack: (() -> Unit)? = null) {
-    Row(
-        Modifier.fillMaxWidth().padding(bottom = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (onBack != null) {
-            IconButton(onClick = onBack, shapes = IconButtonDefaults.shapes()) {
-                Icon(painterResource(R.drawable.ic_arrow_back), contentDescription = "Back")
+                    .animateContentSize(spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
+                    .padding(start = 18.dp, end = 18.dp, top = 10.dp, bottom = 16.dp),
+            ) {
+                // Subtle pill handle anchoring the top of the sheet.
+                Box(
+                    Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .padding(bottom = 14.dp)
+                        .width(36.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
+                )
+                content()
             }
         }
-        Text(
-            text,
-            style = MaterialTheme.typography.titleLargeEmphasized,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = if (onBack != null) 0.dp else 4.dp),
-        )
     }
 }
 
 /**
- * Type first, then choose: Add (to-do), Focus, In&Out, Remind me… or Note.
- * When opened directly in a verb mode (from ▶, a tile, a shortcut, or Reminders), shows that
- * verb straight away and lets Back return to the chooser or close.
+ * Expanding M3 Expressive 4-pill mode bar: the active mode smoothly widens to show its label in
+ * its accent color, while the other three stay clean 48dp+ icon pills. Never wraps, never clips.
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun AddSheetContent(
-    initialMode: AddMode,
+private fun ModeSwitcher(active: CaptureTab, onSelect: (CaptureTab) -> Unit) {
+    val view = LocalView.current
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CaptureTab.entries.forEach { tab ->
+            val isSelected = tab == active
+            val weight by animateFloatAsState(
+                targetValue = if (isSelected) 2.2f else 1f,
+                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+                label = "pill-weight",
+            )
+            val corner by animateDpAsState(
+                targetValue = if (isSelected) 24.dp else 16.dp,
+                animationSpec = spring(stiffness = Spring.StiffnessMedium),
+                label = "pill-corner",
+            )
+            val targetBg = when {
+                !isSelected -> MaterialTheme.colorScheme.surfaceContainerHigh
+                tab == CaptureTab.REMIND -> MaterialTheme.colorScheme.tertiary
+                tab == CaptureTab.NOTE -> MaterialTheme.colorScheme.secondary
+                else -> MaterialTheme.colorScheme.primary
+            }
+            val targetFg = when {
+                !isSelected -> MaterialTheme.colorScheme.onSurfaceVariant
+                tab == CaptureTab.REMIND -> MaterialTheme.colorScheme.onTertiary
+                tab == CaptureTab.NOTE -> MaterialTheme.colorScheme.onSecondary
+                else -> MaterialTheme.colorScheme.onPrimary
+            }
+            val bg by animateColorAsState(targetBg, label = "pill-bg")
+            val fg by animateColorAsState(targetFg, label = "pill-fg")
+
+            Surface(
+                shape = RoundedCornerShape(corner),
+                color = bg,
+                contentColor = fg,
+                modifier = Modifier
+                    .weight(weight)
+                    .height(46.dp)
+                    .semantics {
+                        role = Role.Tab
+                        selected = isSelected
+                        contentDescription = tab.label
+                    }
+                    .clip(RoundedCornerShape(corner))
+                    .clickable {
+                        if (!isSelected) {
+                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                            onSelect(tab)
+                        }
+                    },
+            ) {
+                Row(
+                    Modifier.fillMaxSize().padding(horizontal = 10.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        painterResource(tab.icon),
+                        contentDescription = null,
+                        modifier = Modifier.size(19.dp),
+                    )
+                    AnimatedVisibility(
+                        visible = isSelected,
+                        enter = fadeIn(spring(stiffness = Spring.StiffnessMedium)),
+                        exit = fadeOut(spring(stiffness = Spring.StiffnessHigh)),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Spacer(Modifier.width(7.dp))
+                            Text(
+                                tab.label,
+                                style = MaterialTheme.typography.titleSmallEmphasized,
+                                maxLines = 1,
+                                overflow = TextOverflow.Clip,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The unified morphing capture sheet:
+ * - Top: expanding 4-pill switcher (To-do · Remind · Note · Focus)
+ * - Middle: one living input field whose text stays intact across mode switches, plus the active
+ *   mode's controls gliding smoothly underneath
+ * - Bottom: consistent right-aligned primary CTA (saves & closes), with rapid-capture / mode
+ *   controls cleanly on the left.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun CaptureSheetContent(
+    initialTab: CaptureTab,
     initialText: String,
-    todoId: String?,
-    onSwitchToNote: (String) -> Unit,
     onClose: () -> Unit,
 ) {
     val ctx = LocalContext.current
+    val view = LocalView.current
     val keyboard = LocalSoftwareKeyboardController.current
-    var mode by rememberSaveable { mutableStateOf(initialMode) }
+
+    var tab by rememberSaveable { mutableStateOf(initialTab) }
     var text by rememberSaveable { mutableStateOf(initialText) }
     var added by rememberSaveable { mutableIntStateOf(0) }
-    val focusReq = remember { FocusRequester() }
 
-    val canGoBack = mode != AddMode.PICK && initialMode == AddMode.PICK
-    BackHandler(enabled = canGoBack) { mode = AddMode.PICK }
-
-    // Keyboard stays up when typing a name; drops down when choosing Focus or after typing and picking a verb.
-    val needsKeyboard = when (mode) {
-        AddMode.PICK -> true
-        AddMode.FOCUS -> false
-        AddMode.TRIP, AddMode.REMIND -> text.isBlank() && initialMode == mode
-    }
-    LaunchedEffect(mode) {
-        if (needsKeyboard) {
-            focusReq.requestFocus()
-            delay(150)
-            keyboard?.show()
-        } else {
-            keyboard?.hide()
-        }
-    }
-
-    fun addTodo(): Boolean {
-        if (text.isBlank()) return false
-        TodoStore.add(text)
-        text = ""
-        added++
-        return true
-    }
-
-    when (mode) {
-        AddMode.PICK -> {
-            SheetTitle(if (added > 0) "Saved $added ✓  Another one?" else "What's on your mind?")
-            TextField(
-                value = text,
-                onValueChange = { text = it },
-                modifier = Modifier.fillMaxWidth().focusRequester(focusReq),
-                placeholder = { Text("Reply to Sam, call the bank, check stories…") },
-                singleLine = true,
-                maxLines = 1,
-                shape = RoundedCornerShape(28.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                ),
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Sentences,
-                    imeAction = ImeAction.Done,
-                ),
-                // Keyboard Done adds the to-do and keeps the sheet open for another.
-                keyboardActions = KeyboardActions(onDone = { addTodo() }),
-            )
-            Spacer(Modifier.height(12.dp))
-            FlowRow(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Button(
-                    onClick = { addTodo() },
-                    enabled = text.isNotBlank(),
-                    shapes = ButtonDefaults.shapes(),
-                    modifier = Modifier.heightIn(min = 44.dp),
-                ) { Text("Add") }
-                VerbChip(R.drawable.ic_play, "Focus") {
-                    keyboard?.hide()
-                    mode = AddMode.FOCUS
-                }
-                VerbChip(R.drawable.ic_trip, "In&Out") {
-                    if (text.isNotBlank()) keyboard?.hide()
-                    mode = AddMode.TRIP
-                }
-                VerbChip(R.drawable.ic_bell, "Remind me…") {
-                    if (text.isNotBlank()) keyboard?.hide()
-                    mode = AddMode.REMIND
-                }
-                VerbChip(R.drawable.ic_note, "Note") {
-                    onSwitchToNote(text)
-                }
-            }
-            if (added > 0 && text.isBlank()) {
-                Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onClose, shapes = ButtonDefaults.shapes()) { Text("Done") }
-                }
-            }
-        }
-
-        AddMode.FOCUS -> {
-            FocusVerbContent(
-                label = text.trim().takeIf { it.isNotEmpty() },
-                todoId = todoId,
-                onBack = if (canGoBack) { { mode = AddMode.PICK } } else null,
-                onClose = onClose,
-            )
-        }
-
-        AddMode.TRIP -> {
-            TripVerbContent(
-                text = text,
-                onTextChange = { text = it },
-                showInput = initialMode == AddMode.TRIP || text.isBlank(),
-                focusRequester = focusReq,
-                onBack = if (canGoBack) { { mode = AddMode.PICK } } else null,
-                onClose = onClose,
-            )
-        }
-
-        AddMode.REMIND -> {
-            RemindVerbContent(
-                text = text,
-                onTextChange = { text = it },
-                showInput = initialMode == AddMode.REMIND || text.isBlank(),
-                focusRequester = focusReq,
-                onBack = if (canGoBack) { { mode = AddMode.PICK } } else null,
-                onClose = onClose,
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun VerbChip(icon: Int, label: String, onClick: () -> Unit) {
-    FilledTonalButton(
-        onClick = onClick,
-        shapes = ButtonDefaults.shapes(),
-        contentPadding = PaddingValues(horizontal = 12.dp),
-        modifier = Modifier.heightIn(min = 44.dp),
-    ) {
-        Icon(painterResource(icon), contentDescription = null, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(6.dp))
-        Text(label, maxLines = 1)
-    }
-}
-
-/** Direct multi-line note sheet (also reached by tapping Note from the add sheet). */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun NoteContent(initialText: String, onClose: () -> Unit) {
-    var text by rememberSaveable { mutableStateOf(initialText) }
+    // Note state
     var checklist by rememberSaveable { mutableStateOf(Checklist.isChecklist(initialText)) }
-    var added by rememberSaveable { mutableIntStateOf(0) }
-    val focus = remember { FocusRequester() }
-    val keyboard = LocalSoftwareKeyboardController.current
 
-    LaunchedEffect(Unit) {
-        focus.requestFocus()
-        delay(150)
-        keyboard?.show()
-    }
-
-    fun save(): Boolean {
-        val toSave = if (checklist) Checklist.toChecklist(text) else text
-        if (toSave.isBlank()) return false
-        NoteStore.add(toSave)
-        text = ""
-        added++
-        return true
-    }
-
-    Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            if (added > 0) "Saved $added ✓  Another one?" else if (checklist) "Checklist" else "Note",
-            style = MaterialTheme.typography.titleLargeEmphasized,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f).padding(start = 4.dp),
-        )
-        Text(
-            "Checklist",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.width(8.dp))
-        Switch(checked = checklist, onCheckedChange = { checklist = it })
-    }
-    TextField(
-        value = text,
-        onValueChange = { text = it },
-        modifier = Modifier.fillMaxWidth().focusRequester(focus),
-        placeholder = {
-            Text(if (checklist) "One item per line…" else "A thought, an idea, something to look up…")
-        },
-        singleLine = false,
-        maxLines = 8,
-        shape = RoundedCornerShape(28.dp),
-        colors = TextFieldDefaults.colors(
-            focusedIndicatorColor = Color.Transparent,
-            unfocusedIndicatorColor = Color.Transparent,
-            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-        ),
-        keyboardOptions = KeyboardOptions(
-            capitalization = KeyboardCapitalization.Sentences,
-            imeAction = ImeAction.Default,
-        ),
-    )
-    Spacer(Modifier.height(12.dp))
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Spacer(Modifier.weight(1f))
-        TextButton(onClick = { save() }, enabled = text.isNotBlank(), shapes = ButtonDefaults.shapes()) {
-            Text("Save, add another")
-        }
-        Button(onClick = { if (save()) onClose() }, enabled = text.isNotBlank(), shapes = ButtonDefaults.shapes(), modifier = Modifier.heightIn(min = 48.dp)) {
-            Text("Save")
-        }
-    }
-}
-
-/** Remind me mode inside the add sheet: quick durations, clock time, Repeat…, and mute bell. */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun RemindVerbContent(
-    text: String,
-    onTextChange: (String) -> Unit,
-    showInput: Boolean,
-    focusRequester: FocusRequester,
-    onBack: (() -> Unit)?,
-    onClose: () -> Unit,
-) {
+    // Remind state
     var inMinutes by rememberSaveable { mutableIntStateOf(30) }
     var atHour by rememberSaveable { mutableIntStateOf(-1) }
     var atMinute by rememberSaveable { mutableIntStateOf(0) }
     var alarm by rememberSaveable { mutableStateOf(true) }
-    var picking by rememberSaveable { mutableStateOf(false) }
+    var remindPicking by rememberSaveable { mutableStateOf(false) }
     var repeatOpen by rememberSaveable { mutableStateOf(false) }
-    val now = rememberNow(active = true, periodMs = 15_000L)
 
-    fun at(base: Long = System.currentTimeMillis()): Long =
+    // Focus state
+    val timer by FocusTimer.state.collectAsState()
+    var focusMinutes by rememberSaveable { mutableIntStateOf(AppPrefs.focusMinutes(ctx)) }
+    var readyMinutes by rememberSaveable { mutableIntStateOf(AppPrefs.readyMinutes(ctx)) }
+    var focusPicking by rememberSaveable { mutableStateOf<String?>(null) }
+    var startMenuOpen by rememberSaveable { mutableStateOf(false) }
+
+    val lineFocus = remember { FocusRequester() }
+    val noteFocus = remember { FocusRequester() }
+    val now = rememberNow(active = tab == CaptureTab.REMIND, periodMs = 15_000L)
+
+    // Focus/keyboard choreography: open up for typing, tuck away when switching with text ready to schedule or focus.
+    LaunchedEffect(tab) {
+        when (tab) {
+            CaptureTab.TODO -> {
+                runCatching { lineFocus.requestFocus() }
+                delay(120)
+                keyboard?.show()
+            }
+            CaptureTab.NOTE -> {
+                runCatching { noteFocus.requestFocus() }
+                delay(120)
+                keyboard?.show()
+            }
+            CaptureTab.REMIND -> {
+                if (text.isBlank()) {
+                    runCatching { lineFocus.requestFocus() }
+                    delay(120)
+                    keyboard?.show()
+                } else {
+                    keyboard?.hide()
+                }
+            }
+            CaptureTab.FOCUS -> keyboard?.hide()
+        }
+    }
+
+    fun remindAt(base: Long = System.currentTimeMillis()): Long =
         if (atHour >= 0) Reminder.nextOccurrence(atHour, atMinute, Instant.ofEpochMilli(base).atZone(ZoneId.systemDefault()))
         else base + inMinutes * 60_000L
 
-    fun save(): Boolean {
-        if (text.isBlank()) return false
-        ReminderStore.save(Reminder.once(text, at(), alarm))
-        onClose()
-        return true
+    fun saveTodo(closeAfter: Boolean) {
+        if (text.isBlank()) return
+        TodoStore.add(text)
+        view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+        if (closeAfter) {
+            onClose()
+        } else {
+            text = ""
+            added++
+        }
     }
 
-    if (picking) {
+    fun saveNote(closeAfter: Boolean) {
+        val toSave = if (checklist) Checklist.toChecklist(text) else text
+        if (toSave.isBlank()) return
+        NoteStore.add(toSave)
+        view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+        if (closeAfter) {
+            onClose()
+        } else {
+            text = ""
+            added++
+        }
+    }
+
+    fun saveReminder() {
+        if (text.isBlank()) return
+        ReminderStore.save(Reminder.once(text, remindAt(), alarm))
+        view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+        onClose()
+    }
+
+    fun startFocus(delayMinutes: Int) {
+        AppPrefs.setFocusMinutes(ctx, focusMinutes)
+        val label = text.trim().takeIf { it.isNotEmpty() }
+        if (delayMinutes > 0) {
+            AppPrefs.setReadyMinutes(ctx, delayMinutes)
+            FocusTimer.startAfter(delayMinutes, focusMinutes, label, todoId = null)
+        } else {
+            FocusTimer.start(focusMinutes, label, todoId = null)
+        }
+        view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+        onClose()
+    }
+
+    // Dialogs & sub-sheets
+    if (remindPicking) {
         RemindWhenDialog(
             initialMinutes = inMinutes,
             initialHour = atHour.takeIf { it >= 0 },
             initialMinute = atMinute,
             defaultToClock = atHour >= 0 || inMinutes in REMIND_IN,
-            onDismiss = { picking = false },
-            onPickClock = { h, m -> atHour = h; atMinute = m; picking = false },
-            onPickDuration = { m -> atHour = -1; inMinutes = m; picking = false },
+            onDismiss = { remindPicking = false },
+            onPickClock = { h, m -> atHour = h; atMinute = m; remindPicking = false },
+            onPickDuration = { m -> atHour = -1; inMinutes = m; remindPicking = false },
         )
     }
-
     if (repeatOpen) {
         ReminderSheet(
             initial = null,
@@ -572,78 +530,386 @@ private fun RemindVerbContent(
             onDismiss = { repeatOpen = false; onClose() },
         )
     }
-
-    SheetTitle(if (showInput) "Remind me" else text.trim(), onBack = onBack)
-    if (showInput) {
-        TextField(
-            value = text,
-            onValueChange = onTextChange,
-            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
-            placeholder = { Text("What about?") },
-            singleLine = true,
-            maxLines = 1,
-            shape = RoundedCornerShape(28.dp),
-            colors = TextFieldDefaults.colors(
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-            ),
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.Sentences,
-                imeAction = ImeAction.Done,
-            ),
-            keyboardActions = KeyboardActions(onDone = { save() }),
+    when (focusPicking) {
+        "focus" -> DurationDialog(
+            "Focus for",
+            focusMinutes,
+            onDismiss = { focusPicking = null },
+            onPick = { focusMinutes = it.coerceIn(AppPrefs.FOCUS_RANGE); focusPicking = null },
         )
-        Spacer(Modifier.height(12.dp))
+        "ready" -> DurationDialog(
+            "Start in",
+            readyMinutes,
+            onDismiss = { focusPicking = null },
+            onPick = { focusPicking = null; startFocus(it.coerceIn(AppPrefs.FOCUS_RANGE)) },
+        )
     }
 
-    val pickedClockLabel = if (atHour >= 0) {
-        LocalTime.of(atHour, atMinute).format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT))
-    } else null
-    DurationRow(
-        REMIND_IN,
-        inMinutes,
-        onSelect = { atHour = -1; inMinutes = it },
-        onOther = { picking = true },
-        prefix = "In ",
-        customLabel = pickedClockLabel,
-        otherIcon = R.drawable.ic_schedule,
-        otherDescription = "Pick a time",
-    )
+    // 1. Expanding 4-pill switcher
+    ModeSwitcher(active = tab, onSelect = { tab = it })
+    Spacer(Modifier.height(14.dp))
 
-    Spacer(Modifier.height(12.dp))
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        FilledTonalIconToggleButton(
-            checked = !alarm,
-            onCheckedChange = { muted -> alarm = !muted },
-            shapes = IconButtonDefaults.toggleableShapes(),
-            modifier = Modifier.size(48.dp),
-        ) {
-            Icon(
-                painterResource(R.drawable.ic_bell_off),
-                contentDescription = if (alarm) "Silence reminder" else "Ring like an alarm",
+    // 2. Living input surface (separate keys for single-line vs multi-line avoid Compose scroll-state crashes)
+    val fieldColors = TextFieldDefaults.colors(
+        focusedIndicatorColor = Color.Transparent,
+        unfocusedIndicatorColor = Color.Transparent,
+        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+    )
+    if (tab == CaptureTab.NOTE) {
+        key("multiline-input") {
+            TextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier.fillMaxWidth().focusRequester(noteFocus),
+                placeholder = {
+                    Text(if (checklist) "One item per line…" else "Write it down…")
+                },
+                singleLine = false,
+                minLines = 3,
+                maxLines = 8,
+                shape = RoundedCornerShape(24.dp),
+                colors = fieldColors,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences,
+                    imeAction = ImeAction.Default,
+                ),
             )
         }
-        TextButton(onClick = { repeatOpen = true }, shapes = ButtonDefaults.shapes()) {
-            Text("Repeat…")
+    } else {
+        key("singleline-input") {
+            TextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier.fillMaxWidth().focusRequester(lineFocus),
+                placeholder = {
+                    Text(
+                        when (tab) {
+                            CaptureTab.TODO -> "What needs doing?"
+                            CaptureTab.REMIND -> "Remind me about…"
+                            CaptureTab.FOCUS -> "Focusing on… (optional)"
+                            CaptureTab.NOTE -> ""
+                        },
+                    )
+                },
+                singleLine = true,
+                maxLines = 1,
+                shape = RoundedCornerShape(24.dp),
+                colors = fieldColors,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences,
+                    imeAction = ImeAction.Done,
+                ),
+                keyboardActions = KeyboardActions(
+                    onDone = {
+                        when (tab) {
+                            CaptureTab.TODO -> saveTodo(closeAfter = false)
+                            CaptureTab.REMIND -> saveReminder()
+                            CaptureTab.FOCUS -> keyboard?.hide()
+                            CaptureTab.NOTE -> Unit
+                        }
+                    },
+                ),
+            )
         }
-        Spacer(Modifier.weight(1f))
-        Button(onClick = { save() }, enabled = text.isNotBlank(), shapes = ButtonDefaults.shapes(), modifier = Modifier.heightIn(min = 48.dp)) {
-            val target = at(now)
-            val isTomorrow = Instant.ofEpochMilli(target).atZone(ZoneId.systemDefault()).toLocalDate()
-                .isAfter(LocalDate.now(ZoneId.systemDefault()))
-            val whenLabel = if (isTomorrow) "tomorrow ${clockTime(target)}" else "at ${clockTime(target)}"
-            Text(if (alarm) "Ring $whenLabel" else "Remind $whenLabel")
+    }
+
+    // 3. Mode-specific options gliding smoothly under the input
+    AnimatedVisibility(
+        visible = tab == CaptureTab.REMIND || tab == CaptureTab.FOCUS,
+        enter = fadeIn(spring(stiffness = Spring.StiffnessMediumLow)) + expandVertically(spring(stiffness = Spring.StiffnessMediumLow)),
+        exit = fadeOut(spring(stiffness = Spring.StiffnessHigh)) + shrinkVertically(spring(stiffness = Spring.StiffnessMedium)),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
+            AnimatedContent(
+                targetState = tab,
+                transitionSpec = { fadeIn(spring(stiffness = Spring.StiffnessMedium)) togetherWith fadeOut(spring(stiffness = Spring.StiffnessHigh)) },
+                label = "mode-controls",
+            ) { shownTab ->
+                when (shownTab) {
+                    CaptureTab.REMIND -> {
+                        val pickedClockLabel = if (atHour >= 0) {
+                            LocalTime.of(atHour, atMinute).format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT))
+                        } else null
+                        DurationRow(
+                            REMIND_IN,
+                            inMinutes,
+                            onSelect = { atHour = -1; inMinutes = it },
+                            onOther = { remindPicking = true },
+                            prefix = "In ",
+                            customLabel = pickedClockLabel,
+                            otherIcon = R.drawable.ic_schedule,
+                            otherDescription = "Pick a time",
+                        )
+                    }
+                    CaptureTab.FOCUS -> {
+                        Column(Modifier.fillMaxWidth()) {
+                            DurationRow(
+                                AppPrefs.FOCUS_PRESETS,
+                                focusMinutes,
+                                onSelect = { focusMinutes = it },
+                                onOther = { focusPicking = "focus" },
+                                prefix = "Focus for ",
+                            )
+                            if (timer.isActive) {
+                                Text(
+                                    "Replaces the timer that's running.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 4.dp, top = 6.dp),
+                                )
+                            }
+                        }
+                    }
+                    else -> Spacer(Modifier.height(0.dp))
+                }
+            }
+        }
+    }
+
+    // 4. Consistent bottom thumb-zone action bar
+    Spacer(Modifier.height(14.dp))
+    val ctaColors = when (tab) {
+        CaptureTab.REMIND -> ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.tertiary,
+            contentColor = MaterialTheme.colorScheme.onTertiary,
+        )
+        CaptureTab.NOTE -> ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.secondary,
+            contentColor = MaterialTheme.colorScheme.onSecondary,
+        )
+        else -> ButtonDefaults.buttonColors()
+    }
+
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        when (tab) {
+            CaptureTab.TODO -> {
+                SavedCountPill(added)
+                Spacer(Modifier.weight(1f))
+                if (text.isNotBlank()) {
+                    TextButton(
+                        onClick = { saveTodo(closeAfter = false) },
+                        shapes = ButtonDefaults.shapes(),
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) { Text("+ Another") }
+                    Button(
+                        onClick = { saveTodo(closeAfter = true) },
+                        colors = ctaColors,
+                        shapes = ButtonDefaults.shapes(),
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) { Text("Add") }
+                } else if (added > 0) {
+                    Button(
+                        onClick = onClose,
+                        colors = ctaColors,
+                        shapes = ButtonDefaults.shapes(),
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) { Text("Done") }
+                } else {
+                    Button(
+                        onClick = {},
+                        enabled = false,
+                        colors = ctaColors,
+                        shapes = ButtonDefaults.shapes(),
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) { Text("Add") }
+                }
+            }
+
+            CaptureTab.REMIND -> {
+                FilledTonalIconToggleButton(
+                    checked = !alarm,
+                    onCheckedChange = { muted ->
+                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                        alarm = !muted
+                    },
+                    shapes = IconButtonDefaults.toggleableShapes(),
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Icon(
+                        painterResource(R.drawable.ic_bell_off),
+                        contentDescription = if (alarm) "Silence reminder" else "Ring like an alarm",
+                    )
+                }
+                TextButton(
+                    onClick = { repeatOpen = true },
+                    shapes = ButtonDefaults.shapes(),
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) { Text("Repeat…") }
+                Spacer(Modifier.weight(1f))
+                val target = remindAt(now)
+                val isTomorrow = Instant.ofEpochMilli(target).atZone(ZoneId.systemDefault()).toLocalDate()
+                    .isAfter(LocalDate.now(ZoneId.systemDefault()))
+                val whenLabel = if (isTomorrow) "tomorrow ${clockTime(target)}" else "at ${clockTime(target)}"
+                Button(
+                    onClick = { saveReminder() },
+                    enabled = text.isNotBlank(),
+                    colors = ctaColors,
+                    shapes = ButtonDefaults.shapes(),
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
+                    Text(if (alarm) "Ring $whenLabel" else "Remind $whenLabel", maxLines = 1)
+                }
+            }
+
+            CaptureTab.NOTE -> {
+                val checkBg by animateColorAsState(
+                    if (checklist) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    label = "checklist-bg",
+                )
+                val checkFg by animateColorAsState(
+                    if (checklist) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                    label = "checklist-fg",
+                )
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = checkBg,
+                    contentColor = checkFg,
+                    modifier = Modifier
+                        .heightIn(min = 44.dp)
+                        .clip(RoundedCornerShape(50))
+                        .semantics { role = Role.Checkbox; selected = checklist }
+                        .clickable {
+                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                            checklist = !checklist
+                        },
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            painterResource(if (checklist) R.drawable.ic_check_circle else R.drawable.ic_circle),
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("Checklist", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                    }
+                }
+                SavedCountPill(added)
+                Spacer(Modifier.weight(1f))
+                if (text.isNotBlank()) {
+                    TextButton(
+                        onClick = { saveNote(closeAfter = false) },
+                        shapes = ButtonDefaults.shapes(),
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) { Text("+ Another") }
+                    Button(
+                        onClick = { saveNote(closeAfter = true) },
+                        colors = ctaColors,
+                        shapes = ButtonDefaults.shapes(),
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) { Text("Save") }
+                } else if (added > 0) {
+                    Button(
+                        onClick = onClose,
+                        colors = ctaColors,
+                        shapes = ButtonDefaults.shapes(),
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) { Text("Done") }
+                } else {
+                    Button(
+                        onClick = {},
+                        enabled = false,
+                        colors = ctaColors,
+                        shapes = ButtonDefaults.shapes(),
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) { Text("Save") }
+                }
+            }
+
+            CaptureTab.FOCUS -> {
+                Spacer(Modifier.weight(1f))
+                FocusStartActions(
+                    readyMinutes = readyMinutes,
+                    menuOpen = startMenuOpen,
+                    onMenuChange = { startMenuOpen = it },
+                    onStart = { startFocus(it) },
+                    onPickReady = { focusPicking = "ready" },
+                )
+            }
         }
     }
 }
 
-/** Focus mode inside the add sheet: pick a length, then start now or after a get-ready countdown. */
+/** Gratifying compact counter pill shown while rapid-fire adding multiple to-dos or notes. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun FocusVerbContent(label: String?, todoId: String?, onBack: (() -> Unit)?, onClose: () -> Unit) {
+private fun SavedCountPill(count: Int) {
+    AnimatedVisibility(
+        visible = count > 0,
+        enter = fadeIn() + scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)),
+        exit = fadeOut(),
+    ) {
+        Surface(
+            shape = RoundedCornerShape(50),
+            color = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ) {
+            Row(
+                Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(painterResource(R.drawable.ic_check), contentDescription = null, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("$count", style = MaterialTheme.typography.labelLarge)
+            }
+        }
+    }
+}
+
+/** Split "Start in X ▾" + primary "Start" buttons shared by unified Focus mode and dedicated ▶ Focus. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun FocusStartActions(
+    readyMinutes: Int,
+    menuOpen: Boolean,
+    onMenuChange: (Boolean) -> Unit,
+    onStart: (readyMinutes: Int) -> Unit,
+    onPickReady: () -> Unit,
+) {
+    Box {
+        SplitButtonLayout(
+            leadingButton = {
+                SplitButtonDefaults.TonalLeadingButton(onClick = { onStart(readyMinutes) }) {
+                    Text("Start in ${durationText(readyMinutes)}")
+                }
+            },
+            trailingButton = {
+                SplitButtonDefaults.TonalTrailingButton(checked = menuOpen, onCheckedChange = onMenuChange) {
+                    Icon(
+                        painterResource(R.drawable.ic_expand_more),
+                        contentDescription = "Start later",
+                        modifier = Modifier.size(SplitButtonDefaults.TrailingIconSize).rotate(if (menuOpen) 180f else 0f),
+                    )
+                }
+            },
+        )
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { onMenuChange(false) }) {
+            AppPrefs.READY_CHOICES.forEach { m ->
+                DropdownMenuItem(text = { Text("Start in ${durationText(m)}") }, onClick = { onMenuChange(false); onStart(m) })
+            }
+            DropdownMenuItem(text = { Text("Other…") }, onClick = { onMenuChange(false); onPickReady() })
+        }
+    }
+    Button(
+        onClick = { onStart(0) },
+        shapes = ButtonDefaults.shapes(),
+        modifier = Modifier.heightIn(min = 48.dp),
+    ) { Text("Start") }
+}
+
+/** Dedicated Focus sheet opened from ▶ on a specific to-do: calm, focused, no mode switcher. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun DedicatedFocusContent(label: String?, todoId: String, onClose: () -> Unit) {
     val ctx = LocalContext.current
+    val view = LocalView.current
     val timer by FocusTimer.state.collectAsState()
     var focus by rememberSaveable { mutableIntStateOf(AppPrefs.focusMinutes(ctx)) }
     var ready by rememberSaveable { mutableIntStateOf(AppPrefs.readyMinutes(ctx)) }
@@ -658,11 +924,17 @@ private fun FocusVerbContent(label: String?, todoId: String?, onBack: (() -> Uni
         } else {
             FocusTimer.start(focus, label, todoId)
         }
+        view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
         onClose()
     }
 
     when (picking) {
-        "focus" -> DurationDialog("Focus for", focus, onDismiss = { picking = null }, onPick = { focus = it.coerceIn(AppPrefs.FOCUS_RANGE); picking = null })
+        "focus" -> DurationDialog(
+            "Focus for",
+            focus,
+            onDismiss = { picking = null },
+            onPick = { focus = it.coerceIn(AppPrefs.FOCUS_RANGE); picking = null },
+        )
         "ready" -> DurationDialog(
             "Start in",
             ready,
@@ -671,88 +943,98 @@ private fun FocusVerbContent(label: String?, todoId: String?, onBack: (() -> Uni
         )
     }
 
-    SheetTitle(label ?: "Focus", onBack = onBack)
+    Text(
+        label ?: "Focus",
+        style = MaterialTheme.typography.titleLargeEmphasized,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.padding(start = 4.dp, bottom = 12.dp),
+    )
     DurationRow(AppPrefs.FOCUS_PRESETS, focus, onSelect = { focus = it }, onOther = { picking = "focus" }, prefix = "Focus for ")
     if (timer.isActive) {
         Text(
             "Replaces the timer that's running.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 4.dp, top = 4.dp),
+            modifier = Modifier.padding(start = 4.dp, top = 6.dp),
         )
     }
-
-    Spacer(Modifier.height(12.dp))
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-        Box {
-            SplitButtonLayout(
-                leadingButton = {
-                    SplitButtonDefaults.TonalLeadingButton(onClick = { go(ready) }) { Text("Start in ${durationText(ready)}") }
-                },
-                trailingButton = {
-                    SplitButtonDefaults.TonalTrailingButton(checked = menu, onCheckedChange = { menu = it }) {
-                        Icon(
-                            painterResource(R.drawable.ic_expand_more),
-                            contentDescription = "Start later",
-                            modifier = Modifier.size(SplitButtonDefaults.TrailingIconSize).rotate(if (menu) 180f else 0f),
-                        )
-                    }
-                },
-            )
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                AppPrefs.READY_CHOICES.forEach { m ->
-                    DropdownMenuItem(text = { Text("Start in ${durationText(m)}") }, onClick = { menu = false; go(m) })
-                }
-                DropdownMenuItem(text = { Text("Other…") }, onClick = { menu = false; picking = "ready" })
-            }
-        }
-        Button(onClick = { go(0) }, shapes = ButtonDefaults.shapes()) { Text("Start") }
+    Spacer(Modifier.height(14.dp))
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        FocusStartActions(
+            readyMinutes = ready,
+            menuOpen = menu,
+            onMenuChange = { menu = it },
+            onStart = { go(it) },
+            onPickReady = { picking = "ready" },
+        )
     }
 }
 
-/** In&Out mode inside the add sheet: recent chips, 1 / 2 / 5 min, Go. */
+/** Dedicated In&Out sheet opened from the floating bubble, Quick Settings tile, shortcut or to-do long-press. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalLayoutApi::class)
 @Composable
-private fun TripVerbContent(
-    text: String,
-    onTextChange: (String) -> Unit,
-    showInput: Boolean,
-    focusRequester: FocusRequester,
-    onBack: (() -> Unit)?,
-    onClose: () -> Unit,
-) {
+private fun TripSheetContent(initialText: String, onClose: () -> Unit) {
     val ctx = LocalContext.current
+    val view = LocalView.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val recent by Trips.recent.collectAsState()
     val showTip = remember { !Trips.seenTip() }
     val canOverlay = FloatingGoals.canDraw(ctx)
+    var text by rememberSaveable { mutableStateOf(initialText) }
     var minutes by rememberSaveable { mutableIntStateOf(Trips.lastMinutes()) }
+    val focusReq = remember { FocusRequester() }
+    val showInput = initialText.isBlank()
+
+    LaunchedEffect(Unit) {
+        if (showInput) {
+            focusReq.requestFocus()
+            delay(120)
+            keyboard?.show()
+        } else {
+            keyboard?.hide()
+        }
+    }
 
     fun start(name: String, mins: Int) {
         if (!FloatingGoals.canDraw(ctx)) {
             FloatingGoals.openOverlayPermission(ctx)
             return
         }
-        if (Trips.start(name, mins)) onClose()
+        if (Trips.start(name, mins)) {
+            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+            onClose()
+        }
     }
 
-    SheetTitle(if (showInput) "In&Out" else text.trim(), onBack = onBack)
+    Text(
+        if (showInput) "In&Out" else text.trim(),
+        style = MaterialTheme.typography.titleLargeEmphasized,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
+    )
     if (showTip) {
         Text(
             "Start it, then open the app.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
+            modifier = Modifier.padding(start = 4.dp, bottom = 10.dp),
         )
     }
     if (showInput) {
         TextField(
             value = text,
-            onValueChange = onTextChange,
-            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+            onValueChange = { text = it },
+            modifier = Modifier.fillMaxWidth().focusRequester(focusReq),
             placeholder = { Text("check Marco's stories") },
             singleLine = true,
             maxLines = 1,
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(24.dp),
             colors = TextFieldDefaults.colors(
                 focusedIndicatorColor = Color.Transparent,
                 unfocusedIndicatorColor = Color.Transparent,
@@ -818,7 +1100,7 @@ private fun TripVerbContent(
         )
     }
 
-    Spacer(Modifier.height(12.dp))
+    Spacer(Modifier.height(14.dp))
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
         if (!canOverlay) {
             Button(
